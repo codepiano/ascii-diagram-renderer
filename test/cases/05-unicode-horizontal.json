@@ -1,0 +1,10 @@
+{
+  "name": "unicode horizontal arrow",
+  "input": "Input → Output",
+  "expect": {
+    "nodeLabels": ["Input", "Output"],
+    "edges": [["Input", "Output"]],
+    "tokenKinds": ["text", "arrow", "text"],
+    "diagnostics": 0
+  }
+}

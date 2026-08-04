@@ -1,0 +1,8 @@
+{
+  "name": "markdown list is not a diagram",
+  "input": "- Observe the input\n- Build context\n- Select an action",
+  "expect": {
+    "classification": "text",
+    "diagnostics": 0
+  }
+}

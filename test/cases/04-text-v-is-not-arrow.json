@@ -1,0 +1,10 @@
+{
+  "name": "letter v inside text",
+  "input": "Observation\n    |\n    v\nValue",
+  "expect": {
+    "nodeLabels": ["Observation", "Value"],
+    "tokenKinds": ["text", "line", "arrow", "text"],
+    "edges": [["Observation", "Value"]],
+    "diagnostics": 0
+  }
+}

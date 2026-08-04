@@ -1,0 +1,31 @@
+{
+  "name": "ascii-diagram-renderer",
+  "version": "0.1.0",
+  "description": "Parse common LLM ASCII flow diagrams into Diagram IR and SVG.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
+    },
+    "./svg": {
+      "types": "./dist/svg.d.ts",
+      "import": "./dist/svg.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "demo": "npm run build && python3 -m http.server 4173"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

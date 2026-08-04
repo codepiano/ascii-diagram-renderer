@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ASCII Diagram Renderer Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">ASCII DIAGRAM RENDERER</p>
+          <h1>把模型输出变成可调试的 SVG</h1>
+          <p class="intro">输入常见的 LLM ASCII 流程图，实时查看解析后的 Diagram IR 与渲染结果。</p>
+        </div>
+        <a class="github-link" href="../README.md">查看文档 ↗</a>
+      </header>
+
+      <nav class="tabs" aria-label="Demo sections">
+        <button class="tab active" data-view="playground">Playground</button>
+        <button class="tab" data-view="regression">Regression cases <span id="case-count"></span></button>
+      </nav>
+
+      <section id="playground-view" class="view">
+      <section class="workspace">
+        <div class="panel input-panel">
+          <div class="panel-heading">
+            <div><span class="kicker">01</span><h2>ASCII 输入</h2></div>
+            <select id="example-select" aria-label="选择示例">
+              <option value="flow">Vertical flow</option>
+              <option value="box">Box node</option>
+              <option value="branch">Branch / merge</option>
+            </select>
+          </div>
+          <textarea id="ascii-input" spellcheck="false" aria-label="ASCII diagram input"></textarea>
+          <div class="controls">
+            <label class="mode"><span>布局</span><select id="mode-select"><option value="preserve">Preserve</option><option value="reflow">Reflow</option></select></label>
+            <button id="render-button" class="primary">重新渲染 <span>⌘ ↵</span></button>
+          </div>
+          <p class="hint">提示：修改文本后点击渲染，或使用 ⌘/Ctrl + Enter。</p>
+        </div>
+
+        <div class="panel preview-panel">
+          <div class="panel-heading"><div><span class="kicker">02</span><h2>SVG 预览</h2></div><button id="download-button" class="secondary">下载 SVG</button></div>
+          <div id="preview" class="preview" aria-live="polite"></div>
+          <div id="status" class="status"></div>
+        </div>
+      </section>
+
+      <section class="details">
+        <div class="panel ir-panel"><div class="panel-heading"><div><span class="kicker">03</span><h2>Diagram IR</h2></div><span id="node-count" class="badge"></span></div><pre id="ir-output"></pre></div>
+        <div class="panel token-panel"><div class="panel-heading"><div><span class="kicker">04</span><h2>Tokenizer</h2></div><span id="token-count" class="badge"></span></div><div id="token-output" class="tokens"></div></div>
+      </section>
+      </section>
+
+      <section id="regression-view" class="view hidden">
+        <div class="regression-layout">
+          <aside class="panel case-panel">
+            <div class="panel-heading"><div><span class="kicker">CASES</span><h2>回归用例</h2></div></div>
+            <div id="case-list" class="case-list"><p class="loading">正在加载用例…</p></div>
+          </aside>
+          <div class="regression-main">
+            <div class="panel case-input-panel">
+              <div class="panel-heading"><div><span class="kicker">INPUT</span><h2 id="case-title">选择一个用例</h2></div><button id="load-case-button" class="secondary">载入 Playground</button></div>
+              <pre id="case-input" class="case-input"></pre>
+            </div>
+            <div class="panel case-result-panel">
+              <div class="panel-heading"><div><span class="kicker">RESULT</span><h2>实际渲染结果</h2></div><span id="case-verdict" class="verdict"></span></div>
+              <div id="case-preview" class="preview"></div>
+            </div>
+            <div class="panel assertion-panel">
+              <div class="panel-heading"><div><span class="kicker">ASSERTIONS</span><h2>语义断言</h2></div><span class="muted">以 IR 为准，不锁定完整 SVG</span></div>
+              <div id="case-assertions" class="assertions"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

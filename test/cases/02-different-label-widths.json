@@ -1,0 +1,10 @@
+{
+  "name": "different label widths stay aligned",
+  "input": "World State\n    |\n    v\nObservation\n    |\n    v\nDecision",
+  "options": { "mode": "preserve" },
+  "expect": {
+    "nodeLabels": ["World State", "Observation", "Decision"],
+    "edges": [["World State", "Observation"], ["Observation", "Decision"]],
+    "svg": ["M 64.5 142 L 64.5 167 L 64.5 167 L 64.5 192"]
+  }
+}

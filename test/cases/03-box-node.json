@@ -1,0 +1,10 @@
+{
+  "name": "boxed context node",
+  "input": "+---------+\n| Context |\n+---------+\n     |\n     v\n  Decision",
+  "expect": {
+    "nodeLabels": ["Context", "Decision"],
+    "nodeShapes": ["box", "text"],
+    "edges": [["Context", "Decision"]],
+    "diagnostics": 0
+  }
+}

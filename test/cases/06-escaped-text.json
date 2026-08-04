@@ -1,0 +1,9 @@
+{
+  "name": "escaped XML text",
+  "input": "A < B\n    |\n    v\nC & D",
+  "expect": {
+    "nodeLabels": ["A < B", "C & D"],
+    "edges": [["A < B", "C & D"]],
+    "svg": ["A &lt; B", "C &amp; D"]
+  }
+}

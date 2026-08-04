@@ -1,0 +1,9 @@
+{
+  "name": "plain paragraph is not a diagram",
+  "input": "The model observes the world and then decides what action to take.",
+  "expect": {
+    "classification": "text",
+    "nodeLabels": ["The model observes the world and then decides what action to take."],
+    "diagnostics": 0
+  }
+}

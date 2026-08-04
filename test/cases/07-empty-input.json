@@ -1,0 +1,9 @@
+{
+  "name": "empty input reports a diagnostic",
+  "input": "",
+  "expect": {
+    "nodeLabels": [],
+    "edges": [],
+    "diagnostics": 1
+  }
+}
