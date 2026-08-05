@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parseAscii, asciiToSvg } from "../dist/index.js";
 
 test("recovers a vertical flow", () => {
@@ -48,4 +50,36 @@ test("recognizes boxed nodes", () => {
   assert.equal(result.diagram.nodes.length, 1);
   assert.equal(result.diagram.nodes[0].shape, "box");
   assert.equal(result.diagram.nodes[0].label, "Context");
+});
+
+test("examples group keeps member boxes separated", () => {
+  const input = "LLM\n |\nFunction Calling\n |\n自己写各种adapter\n\nGitHub API\n数据库\n文件系统\nSlack";
+  const svg = asciiToSvg(input, { mode: "preserve" });
+  assert.match(svg, /class="group"/);
+  assert.match(svg, /stroke-dasharray/);
+  const textY = [...svg.matchAll(/<text x="[\d.]+" y="([\d.]+)"/g)].map(match => Number(match[1]));
+  assert.ok(textY.length >= 7);
+  assert.ok(textY.at(-1) - textY.at(-2) >= 40);
+});
+
+test("examples group centers on its parent while members stay left aligned", () => {
+  const input = "LLM\n |\nFunction Calling\n |\n自己写各种adapter\n\nGitHub API\n数据库\n文件系统\nSlack";
+  const svg = asciiToSvg(input, { mode: "preserve" });
+  const parentCenter = Number(svg.match(/<text x="([\d.]+)" y="153"[^>]*>自己写各种adapter<\/text>/)?.[1]);
+  const group = svg.match(/<g class="group"><rect x="(-?[\d.]+)" y="[\d.]+" width="([\d.]+)"/);
+  assert.equal(Number(group?.[1]) + Number(group?.[2]) / 2, parentCenter);
+  const memberLefts = [...svg.matchAll(/data-node-id="n[4-7]"><rect class="text-node" x="(-?[\d.]+)"/g)].map(match => Number(match[1]));
+  assert.deepEqual(memberLefts, [memberLefts[0], memberLefts[0], memberLefts[0], memberLefts[0]]);
+});
+
+test("branch routes preserve the horizontal trunk", () => {
+  const fixture = JSON.parse(readFileSync(fileURLToPath(new URL("./cases/11-tree-branch.json", import.meta.url)), "utf8"));
+  const input = fixture.input;
+  const svg = asciiToSvg(input, { mode: "preserve" });
+  const expectedY = fixture.expect.render.trunkRow * 28 + 24 + 14;
+  assert.match(svg, new RegExp(`L [\\d.]+ ${expectedY} L [\\d.]+ ${expectedY}`));
+  assert.doesNotMatch(svg, /marker-end/);
+  const rootCenter = svg.match(new RegExp(`<text x="([\\d.]+)" y="41"[^>]*>${fixture.expect.render.rootLabel}</text>`))?.[1];
+  const expectedX = fixture.expect.render.rootCenterColumn * 9 + 24 + 4.5;
+  assert.equal(rootCenter, String(expectedX));
 });

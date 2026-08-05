@@ -15,6 +15,18 @@ export function tokenize(grid: CharacterGrid): Token[] {
   const used = new Set<string>();
   const at = (row: number, col: number) => grid.char({ row, col });
   const key = (p: Point) => `${p.row}:${p.col}`;
+  const verticalColumnsAt = (row: number) => [...Array(grid.width)].map((_, col) => col).filter(col => vertical.has(at(row, col)));
+  const nearbyColumnAnchors = (row: number, left: number, right: number) => {
+    const candidates: Array<{ distance: number; columns: number[] }> = [];
+    for (let distance = 1; distance <= 3; distance++) {
+      for (const candidateRow of [row - distance, row + distance]) {
+        const columns = verticalColumnsAt(candidateRow).filter(col => col >= left && col < right);
+        if (columns.length >= 2) candidates.push({ distance, columns });
+      }
+    }
+    candidates.sort((a, b) => b.columns.length - a.columns.length || a.distance - b.distance);
+    return candidates[0]?.columns ?? [];
+  };
   const isArrowAt = (row: number, col: number) => {
     const ch = at(row, col);
     if (ch !== "v" && ch !== "^") return Boolean(arrows[ch]);
@@ -55,8 +67,26 @@ export function tokenize(grid: CharacterGrid): Token[] {
       if (!isConnectorAt(r, c) && !grid.isBlank({ row: r, col: c })) {
         const start = c;
         while (c < grid.width && !isConnectorAt(r, c)) c++;
-        const text = grid.lines[r].slice(start, c).trim();
-        if (text) tokens.push({ kind: "text", text, bounds: { top: r, left: start, bottom: r, right: c - 1 } });
+        const raw = grid.lines[r].slice(start, c).replace(/\s+$/, "");
+        const anchors = nearbyColumnAnchors(r, start, c);
+        const segments = anchors.length >= 2
+          ? [start, ...anchors.slice(1).map((anchor, index) => Math.floor((anchors[index] + anchor) / 2)), c]
+          : null;
+        if (segments) {
+          for (let index = 0; index < segments.length - 1; index++) {
+            const segmentStart = segments[index], segmentEnd = segments[index + 1];
+            const text = grid.lines[r].slice(segmentStart, segmentEnd).trim();
+            const first = grid.lines[r].slice(segmentStart, segmentEnd).search(/\S/);
+            if (text && first >= 0) tokens.push({ kind: "text", text, bounds: { top: r, left: segmentStart + first, bottom: r, right: segmentStart + first + [...text].length - 1 } });
+          }
+        } else {
+          const columnSpans = /\S(?:.*?\S)?(?=\s{2,}|$)/g;
+          for (const match of raw.matchAll(columnSpans)) {
+            const text = match[0].trim();
+            const left = start + match.index! + match[0].search(/\S/);
+            if (text) tokens.push({ kind: "text", text, bounds: { top: r, left, bottom: r, right: left + [...text].length - 1 } });
+          }
+        }
         continue;
       }
       c++;

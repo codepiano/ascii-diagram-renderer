@@ -86,10 +86,12 @@ function semanticChecks(fixture, diagram, classification) {
   const nodeShapes = diagram.nodes.map(node => node.shape);
   const labelById = new Map(diagram.nodes.map(node => [node.id, node.label]));
   const edges = diagram.edges.map(edge => [labelById.get(edge.source), labelById.get(edge.target)]);
+  const groups = diagram.groups.map(group => ({ kind: group.kind, parent: labelById.get(group.parent), members: group.members.map(id => labelById.get(id)) }));
   const checks = [];
   if (expected.nodeLabels) checks.push(["节点标签", JSON.stringify(labels) === JSON.stringify(expected.nodeLabels), `${labels.length} nodes`]);
   if (expected.nodeShapes) checks.push(["节点形状", JSON.stringify(nodeShapes) === JSON.stringify(expected.nodeShapes), nodeShapes.join(", ")]);
   if (expected.edges) checks.push(["有向边", JSON.stringify(edges) === JSON.stringify(expected.edges), `${edges.length} edges`]);
+  if (expected.groups) checks.push(["语义分组", JSON.stringify(groups) === JSON.stringify(expected.groups), `${groups.length} groups`]);
   if (expected.tokenKinds) checks.push(["Token 类型", JSON.stringify(parsedTokens(selectedCase.input)) === JSON.stringify(expected.tokenKinds), `${selectedCase.input.length} chars`]);
   if (expected.diagnostics !== undefined) checks.push(["诊断数量", diagram.diagnostics.length === expected.diagnostics, `${diagram.diagnostics.length} diagnostics`]);
   if (expected.classification) checks.push(["Diagram 分类", classification.kind === expected.classification, `${classification.kind} · ${classification.confidence}`]);

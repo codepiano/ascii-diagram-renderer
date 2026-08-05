@@ -1,0 +1,11 @@
+{
+  "name": "vertical connections without arrowheads",
+  "input": "LLM\n |\nFunction Calling\n |\n自己写各种adapter\n\nGitHub API\n数据库\n文件系统\nSlack",
+  "expect": {
+    "classification": "diagram",
+    "nodeLabels": ["LLM", "Function Calling", "自己写各种adapter", "GitHub API", "数据库", "文件系统", "Slack"],
+    "edges": [["LLM", "Function Calling"], ["Function Calling", "自己写各种adapter"]],
+    "groups": [{"kind": "examples", "parent": "自己写各种adapter", "members": ["GitHub API", "数据库", "文件系统", "Slack"]}],
+    "diagnostics": 0
+  }
+}

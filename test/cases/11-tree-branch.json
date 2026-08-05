@@ -1,0 +1,11 @@
+{
+  "name": "tree with horizontal fan-out",
+  "input": "                 Agent System\n\n                       |\n        --------------------------------\n        |              |               |\n\n    Context        State          Communication\n\n        |              |               |\n\n    MCP            Workflow          A2A\n\n                       |\n                    Network\n\n                       |\n                     ANP",
+  "expect": {
+    "classification": "diagram",
+    "nodeLabels": ["Agent System", "Context", "State", "Communication", "MCP", "Workflow", "A2A", "Network", "ANP"],
+    "edges": [["Agent System", "Context"], ["Agent System", "State"], ["Agent System", "Communication"], ["Context", "MCP"], ["State", "Workflow"], ["Communication", "A2A"], ["Workflow", "Network"], ["Network", "ANP"]],
+    "render": { "rootLabel": "Agent System", "rootCenterColumn": 23, "trunkRow": 3 },
+    "diagnostics": 0
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "single-space columns use vertical anchors",
+  "input": "| | |\nA B C\n| | |",
+  "expect": {
+    "classification": "diagram",
+    "nodeLabels": ["A", "B", "C"],
+    "edges": [],
+    "diagnostics": 0
+  }
+}

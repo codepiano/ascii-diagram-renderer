@@ -42,7 +42,7 @@ import { asciiToSvg } from "ascii-diagram-renderer";
   nodes: [{ id, label, shape, sourceBounds }],
   edges: [{ id, source, target, direction, sourcePath }],
   version: "1",
-  groups: [],
+  groups: [{ kind: "examples", parent: "n3", members: ["n4", "n5"] }],
   diagnostics: []
 }
 ```

@@ -28,11 +28,11 @@ export type DiagramEdge = {
   target: string;
   direction: "up" | "down" | "left" | "right";
   sourcePath: Point[];
-  sourceRoute?: "vertical" | "horizontal" | "orthogonal";
+  sourceRoute?: "vertical" | "horizontal" | "orthogonal" | "branch";
   arrow?: "none" | "normal";
 };
 
-export type DiagramGroup = { id: string; label?: string; members: string[]; sourceBounds?: Bounds };
+export type DiagramGroup = { id: string; kind: "examples" | "group"; label?: string; parent?: string; members: string[]; sourceBounds?: Bounds };
 
 export type Diagram = {
   nodes: DiagramNode[];

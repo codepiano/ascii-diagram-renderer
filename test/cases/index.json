@@ -7,5 +7,8 @@
   "06-escaped-text.json",
   "07-empty-input.json",
   "08-plain-paragraph.json",
-  "09-markdown-list.json"
+  "09-markdown-list.json",
+  "10-lines-without-arrows.json",
+  "11-tree-branch.json",
+  "12-single-space-columns.json"
 ]
