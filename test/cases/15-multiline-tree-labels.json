@@ -1,0 +1,10 @@
+{
+  "name": "tree nodes with multiline text domains",
+  "input": "               Text\n                 │\n        ┌────────┴────────┐\n        ▼                 ▼\n      EVOKE             INVOKE\n        │                 │\n lexical/grammar       interpreter\n explicitly indexes   supplies frame\n a frame              for coherence\n        │                 │\n        └────────┬────────┘\n                 ▼\n           Envisionment",
+  "expect": {
+    "classification": "diagram",
+    "nodeLabels": ["Text", "EVOKE", "INVOKE", "lexical/grammar\nexplicitly indexes\na frame", "interpreter\nsupplies frame\nfor coherence", "Envisionment"],
+    "edges": [["Text", "EVOKE"], ["Text", "INVOKE"], ["EVOKE", "lexical/grammar\nexplicitly indexes\na frame"], ["INVOKE", "interpreter\nsupplies frame\nfor coherence"], ["lexical/grammar\nexplicitly indexes\na frame", "Envisionment"], ["interpreter\nsupplies frame\nfor coherence", "Envisionment"]]
+  },
+  "options": { "mode": "preserve" }
+}

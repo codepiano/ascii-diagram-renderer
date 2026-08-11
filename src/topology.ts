@@ -4,10 +4,48 @@ const center = (b: Bounds): Point => ({ row: Math.round((b.top + b.bottom) / 2),
 const distance = (a: Point, b: Point) => Math.abs(a.row - b.row) + Math.abs(a.col - b.col);
 const nodeTokens = (tokens: Token[]) => tokens.filter((t): t is Extract<Token, { kind: "text" | "box" }> => t.kind === "text" || t.kind === "box");
 
+function mergeMultilineTextNodes(nodes: DiagramNode[], lines: Token[]): DiagramNode[] {
+  const verticals = lines.filter((token): token is Extract<Token, { kind: "line" }> => token.kind === "line" && token.orientation === "vertical");
+  const consumed = new Set<string>();
+  const replacements = new Map<string, DiagramNode>();
+  for (const parent of nodes) {
+    if (parent.shape !== "text") continue;
+    const parentCenter = center(parent.sourceBounds);
+    const outgoing = verticals.filter(line => line.points.some(point => point.row === parent.sourceBounds.bottom + 1)).sort((a, b) => Math.abs(a.points[0].col - parentCenter.col) - Math.abs(b.points[0].col - parentCenter.col))[0];
+    if (!outgoing) continue;
+    const axis = outgoing.points[0].col;
+    const startRow = parent.sourceBounds.bottom + 2;
+    const closing = verticals.filter(line => line.points.some(point => point.col === axis && point.row >= startRow)).flatMap(line => line.points.filter(point => point.col === axis && point.row >= startRow)).sort((a, b) => a.row - b.row)[0];
+    if (!closing || closing.row === startRow) continue;
+    const descriptions = nodes.filter(candidate => candidate.id !== parent.id && !consumed.has(candidate.id) && candidate.shape === "text" && candidate.sourceBounds.top >= startRow && candidate.sourceBounds.bottom < closing.row).filter(candidate => {
+      const candidateCenter = center(candidate.sourceBounds);
+      const nearerParent = nodes.filter(other => other.id !== parent.id && other.sourceBounds.top === parent.sourceBounds.top).every(other => Math.abs(candidateCenter.col - axis) <= Math.abs(candidateCenter.col - center(other.sourceBounds).col));
+      return nearerParent;
+    }).sort((a, b) => a.sourceBounds.top - b.sourceBounds.top || a.sourceBounds.left - b.sourceBounds.left);
+    // A single following row is normally the next node in a vertical flow.
+    // Treat it as a text domain only when the author supplied a real block.
+    if (descriptions.length < 2) continue;
+    const [body, ...continuations] = descriptions;
+    continuations.forEach(description => consumed.add(description.id));
+    replacements.set(body.id, {
+      ...body,
+      label: descriptions.map(description => description.label).join("\n"),
+      sourceBounds: {
+        top: body.sourceBounds.top,
+        left: Math.min(...descriptions.map(description => description.sourceBounds.left)),
+        bottom: Math.max(...descriptions.map(description => description.sourceBounds.bottom)),
+        right: Math.max(...descriptions.map(description => description.sourceBounds.right))
+      }
+    });
+  }
+  return nodes.filter(node => !consumed.has(node.id)).map(node => replacements.get(node.id) ?? node);
+}
+
 export function recoverTopology(tokens: Token[], source: { lines: string[]; width: number; height: number }): Diagram {
   let nodes: DiagramNode[] = nodeTokens(tokens).map((token, i) => ({ id: `n${i + 1}`, label: token.kind === "box" ? token.label : token.text, shape: token.kind === "box" ? "box" : "text", sourceBounds: token.bounds }));
   const arrows = tokens.filter((t): t is Extract<Token, { kind: "arrow" }> => t.kind === "arrow");
   const lines = tokens.filter((t): t is Extract<Token, { kind: "line" }> => t.kind === "line");
+  nodes = mergeMultilineTextNodes(nodes, tokens);
   const horizontalRows = new Set(lines.filter(line => line.orientation === "horizontal").map(line => line.points[0].row));
   const edges: DiagramEdge[] = [];
   const groups: Diagram["groups"] = [];
@@ -49,23 +87,26 @@ export function recoverTopology(tokens: Token[], source: { lines: string[]; widt
     const row = horizontal.points[0].row;
     const left = horizontal.points[0].col;
     const right = horizontal.points.at(-1)!.col;
-    const columns = [...new Set([
-      ...lines.filter(line => line.orientation === "vertical").flatMap(line => line.points.filter(point => point.row === row - 1 || point.row === row + 1).map(point => point.col)),
-      ...arrows.filter(arrow => arrow.direction === "down" && (arrow.point.row === row - 1 || arrow.point.row === row + 1)).map(arrow => arrow.point.col)
-    ])].filter(col => col >= left && col <= right);
+    const verticalAbove = [...new Set(lines.filter(line => line.orientation === "vertical").flatMap(line => line.points.filter(point => point.row === row - 1).map(point => point.col)))].filter(col => col >= left && col <= right);
+    const downArrows = arrows.filter(arrow => arrow.direction === "down" && arrow.point.row === row + 1 && arrow.point.col >= left && arrow.point.col <= right);
+    const verticalBelow = [...new Set(lines.filter(line => line.orientation === "vertical").flatMap(line => line.points.filter(point => point.row === row + 1).map(point => point.col)))].filter(col => col >= left && col <= right);
     const above = (col: number) => nodes.filter(node => node.sourceBounds.bottom < row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => b.sourceBounds.bottom - a.sourceBounds.bottom)[0];
     const below = (col: number) => nodes.filter(node => node.sourceBounds.top > row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => a.sourceBounds.top - b.sourceBounds.top)[0];
-    const parent = columns.map(above).find(Boolean);
-    if (!parent) continue;
-    for (const col of columns) {
-      const target = below(col);
-      if (!target || edges.some(edge => edge.source === parent.id && edge.target === target.id)) continue;
-      const hasArrowhead = arrows.some(arrow => arrow.direction === "down" && (arrow.point.row === row - 1 || arrow.point.row === row + 1) && arrow.point.col === col);
-      edges.push({ id: `e${edges.length + 1}`, source: parent.id, target: target.id, direction: "down", sourcePath: [center(parent.sourceBounds), { row, col }, center(target.sourceBounds)], sourceRoute: "branch", arrow: hasArrowhead ? "normal" : "none" });
+    const sourceColumns = verticalAbove;
+    const targetColumns = downArrows.length ? downArrows.map(arrow => arrow.point.col) : verticalBelow;
+    const parents = sourceColumns.map(above).filter(Boolean) as DiagramNode[];
+    const targets = targetColumns.map(below).filter(Boolean) as DiagramNode[];
+    if (!parents.length || !targets.length) continue;
+    const pairs = parents.length === 1 || targets.length === 1 ? parents.flatMap(parent => targets.map(target => [parent, target] as const)) : parents.map((parent, index) => [parent, targets[index]] as const).filter((pair): pair is readonly [DiagramNode, DiagramNode] => Boolean(pair[1]));
+    for (const [parent, target] of pairs) {
+      if (edges.some(edge => edge.source === parent.id && edge.target === target.id)) continue;
+      const col = targetColumns[targets.indexOf(target)] ?? sourceColumns[parents.indexOf(parent)];
+      edges.push({ id: `e${edges.length + 1}`, source: parent.id, target: target.id, direction: "down", sourcePath: [center(parent.sourceBounds), { row, col }, center(target.sourceBounds)], sourceRoute: "branch", arrow: downArrows.length ? "normal" : "none" });
     }
   }
   for (const arrow of arrows) {
     if (consumedArrows.has(arrow)) continue;
+    if (edges.some(edge => edge.sourceRoute === "branch" && edge.arrow === "normal" && edge.sourcePath[1]?.row === arrow.point.row - 1 && edge.sourcePath[1]?.col === arrow.point.col)) continue;
     const before = nodes.filter(n => center(n.sourceBounds).row < arrow.point.row || (center(n.sourceBounds).row === arrow.point.row && center(n.sourceBounds).col < arrow.point.col));
     const after = nodes.filter(n => center(n.sourceBounds).row > arrow.point.row || (center(n.sourceBounds).row === arrow.point.row && center(n.sourceBounds).col > arrow.point.col));
     const candidates = arrow.direction === "down" || arrow.direction === "up" ? [before.sort((a,b) => distance(center(b.sourceBounds), arrow.point) - distance(center(a.sourceBounds), arrow.point)).at(-1), after.sort((a,b) => distance(center(a.sourceBounds), arrow.point) - distance(center(b.sourceBounds), arrow.point))[0]] : [before.at(-1), after[0]];
@@ -78,6 +119,7 @@ export function recoverTopology(tokens: Token[], source: { lines: string[]; widt
     const lineBounds = { top: line.points[0].row, left: line.points[0].col, bottom: line.points.at(-1)!.row, right: line.points.at(-1)!.col };
     if (line.orientation === "vertical") {
       if (line.points.some(point => horizontalRows.has(point.row - 1) || horizontalRows.has(point.row + 1))) continue;
+      if (nodes.some(node => node.sourceBounds.top <= lineBounds.top && node.sourceBounds.bottom >= lineBounds.bottom && node.sourceBounds.left <= lineBounds.left && node.sourceBounds.right >= lineBounds.right)) continue;
       const sourceNode = nodes.filter(node => node.sourceBounds.bottom < lineBounds.top).sort((a, b) => b.sourceBounds.bottom - a.sourceBounds.bottom || Math.abs(center(a.sourceBounds).col - lineBounds.left) - Math.abs(center(b.sourceBounds).col - lineBounds.left))[0];
       const targetNode = nodes.filter(node => node.sourceBounds.top > lineBounds.bottom).sort((a, b) => a.sourceBounds.top - b.sourceBounds.top || Math.abs(center(a.sourceBounds).col - lineBounds.left) - Math.abs(center(b.sourceBounds).col - lineBounds.left))[0];
       if (sourceNode && targetNode && !edges.some(edge => edge.source === sourceNode.id && edge.target === targetNode.id)) edges.push({ id: `e${edges.length + 1}`, source: sourceNode.id, target: targetNode.id, direction: "down", sourcePath: [center(sourceNode.sourceBounds), line.points[Math.floor(line.points.length / 2)], center(targetNode.sourceBounds)], sourceRoute: "vertical", arrow: "none" });
@@ -90,6 +132,7 @@ export function recoverTopology(tokens: Token[], source: { lines: string[]; widt
   // A horizontal trunk with vertical stubs represents a fan-out/fan-in.
   for (const horizontal of lines.filter(line => line.orientation === "horizontal")) {
     const row = horizontal.points[0].row;
+    if (arrows.some(arrow => arrow.direction === "down" && arrow.point.row === row + 1)) continue;
     const left = horizontal.points[0].col;
     const right = horizontal.points.at(-1)!.col;
     const columns = [...new Set(lines.filter(line => line.orientation === "vertical").flatMap(line => line.points.filter(point => point.row === row - 1 || point.row === row + 1).map(point => point.col)))].filter(col => col >= left && col <= right);

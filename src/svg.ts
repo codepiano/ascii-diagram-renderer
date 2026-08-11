@@ -5,7 +5,16 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
   const cellWidth = options.cellWidth ?? 9, cellHeight = options.cellHeight ?? 28, padding = options.padding ?? 24, fontSize = options.fontSize ?? 16;
   const positions = new Map<string, { x: number; y: number; w: number; h: number }>();
   if (options.mode === "reflow") diagram.nodes.forEach((n, i) => positions.set(n.id, { x: (i % 3) * 190 + padding, y: Math.floor(i / 3) * 100 + padding, w: Math.max(100, n.label.length * 9 + 28), h: 42 }));
-  else diagram.nodes.forEach(n => { const b = n.sourceBounds; positions.set(n.id, { x: b.left * cellWidth + padding, y: b.top * cellHeight + padding, w: Math.max((b.right - b.left + 1) * cellWidth, n.label.length * 9 + 20), h: n.shape === "box" ? Math.max(42, (b.bottom - b.top + 1) * cellHeight) : 34 }); });
+  else diagram.nodes.forEach(n => {
+    const b = n.sourceBounds;
+    const labelLines = n.label.split("\n");
+    positions.set(n.id, {
+      x: b.left * cellWidth + padding,
+      y: b.top * cellHeight + padding,
+      w: Math.max((b.right - b.left + 1) * cellWidth, ...labelLines.map(line => line.length * 9 + 20)),
+      h: n.shape === "box" ? Math.max(42, (b.bottom - b.top + 1) * cellHeight) : labelLines.length === 1 ? 34 : labelLines.length * 20 + 18
+    });
+  });
   if (options.mode !== "reflow") {
     const anchors = new Map<string, { x?: number; y?: number }>();
     for (const edge of diagram.edges) {
@@ -26,8 +35,10 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
         const targetValue = edge.direction === "left" || edge.direction === "right"
           ? { y: anchor.row * cellHeight + padding + cellHeight / 2 }
           : { x: anchor.col * cellWidth + padding + cellWidth / 2 };
-        anchors.set(edge.source, { ...anchors.get(edge.source), ...sourceValue });
-        anchors.set(edge.target, { ...anchors.get(edge.target), ...targetValue });
+        // An explicit incoming/outgoing vertical line is a stronger alignment
+        // cue than a later branch route. Keep its axis when both are present.
+        anchors.set(edge.source, { ...sourceValue, ...anchors.get(edge.source) });
+        anchors.set(edge.target, { ...targetValue, ...anchors.get(edge.target) });
         continue;
       }
       const value = edge.direction === "left" || edge.direction === "right"
@@ -94,13 +105,19 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
       const marker = e.arrow === "normal" ? ` marker-end="url(#arrow)"` : "";
       return `<path class="edge" d="M ${route.map(point => `${point.x} ${point.y}`).join(" L ")}"${marker}/>`;
     }
-    const a = sourcePoint(e, "start"), b = sourcePoint(e, "end");
+    let a = sourcePoint(e, "start"), b = sourcePoint(e, "end");
     const middleY = (a.y + b.y) / 2;
     const middleX = (a.x + b.x) / 2;
     const branchPoint = e.sourceRoute === "branch" && options.mode !== "reflow" ? e.sourcePath[1] : undefined;
+    if (branchPoint) {
+      const source = positions.get(e.source)!;
+      const target = positions.get(e.target)!;
+      a = { x: source.x + source.w / 2, y: source.y + source.h };
+      b = { x: target.x + target.w / 2, y: target.y };
+    }
     const branchY = branchPoint ? branchPoint.row * cellHeight + padding + cellHeight / 2 : middleY;
-    const branchSourceX = branchPoint ? e.sourcePath[0].col * cellWidth + padding + cellWidth / 2 : a.x;
-    const branchTargetX = branchPoint ? branchPoint.col * cellWidth + padding + cellWidth / 2 : b.x;
+    const branchSourceX = a.x;
+    const branchTargetX = b.x;
     const d = branchPoint
       ? `M ${branchSourceX} ${a.y} L ${branchSourceX} ${branchY} L ${branchTargetX} ${branchY} L ${branchTargetX} ${b.y}`
       : e.direction === "left" || e.direction === "right"
@@ -120,7 +137,16 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
     const right = Math.max(...members.map(p => p.x + p.w)) + 14, bottom = Math.max(...members.map(p => p.y + p.h)) + 14;
     return `<g class="group"><rect x="${left}" y="${top}" width="${right - left}" height="${bottom - top}" rx="10"/><text x="${left + 10}" y="${top + 14}">${esc(group.label ?? group.kind)}</text></g>`;
   }).join("");
-  const nodes = diagram.nodes.map(n => { const p = positions.get(n.id)!; const shape = n.shape === "box" ? `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="6"/>` : `<rect class="text-node" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="6"/>`; return `<g class="node" data-node-id="${esc(n.id)}">${shape}<text x="${p.x + p.w / 2}" y="${p.y + p.h / 2}" text-anchor="middle" dominant-baseline="middle">${esc(n.label)}</text></g>`; }).join("");
+  const nodes = diagram.nodes.map(n => {
+    const p = positions.get(n.id)!;
+    const shape = n.shape === "box" ? `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="6"/>` : `<rect class="text-node" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="6"/>`;
+    const lines = n.label.split("\n");
+    const x = p.x + p.w / 2;
+    const text = lines.length === 1
+      ? `<text x="${x}" y="${p.y + p.h / 2}" text-anchor="middle" dominant-baseline="middle">${esc(lines[0])}</text>`
+      : `<text x="${x}" y="${p.y + p.h / 2 - (lines.length - 1) * 10}" text-anchor="middle" dominant-baseline="middle">${lines.map((line, index) => `<tspan x="${x}"${index ? ` dy="20"` : ""}>${esc(line)}</tspan>`).join("")}</text>`;
+    return `<g class="node" data-node-id="${esc(n.id)}">${shape}${text}</g>`;
+  }).join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} 0 ${maxX - minX} ${maxY}" role="img"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z"/></marker></defs><style>.edge{fill:none;stroke:#64748b;stroke-width:2}.edge-label{font:${fontSize}px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#0f172a;paint-order:stroke;stroke:#f8fafc;stroke-width:8px;stroke-linejoin:round}.group rect{fill:#f8fafc;stroke:#aab4c5;stroke-width:1.5;stroke-dasharray:5 4}.group text{font:11px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#748096}.node rect{fill:#fff;stroke:#334155;stroke-width:2}.node .text-node{fill:#f8fafc}.node text{font:${fontSize}px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#0f172a}</style>${groups}${paths}${edgeLabels}${nodes}</svg>`;
 }
 

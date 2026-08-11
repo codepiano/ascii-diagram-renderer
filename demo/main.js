@@ -1,5 +1,5 @@
-import { parseAscii } from "../dist/core.js";
-import { renderSvg } from "../dist/svg.js";
+import { parseAscii } from "../dist/core.js?v=20260812-multiline-domains";
+import { renderSvg } from "../dist/svg.js?v=20260812-multiline-domains";
 
 const examples = {
   flow: `World State

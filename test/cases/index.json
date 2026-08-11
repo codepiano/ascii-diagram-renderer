@@ -12,5 +12,6 @@
   "11-tree-branch.json",
   "12-single-space-columns.json",
   "13-rectangular-cycle.json",
-  "14-unicode-junction-tree.json"
+  "14-unicode-junction-tree.json",
+  "15-multiline-tree-labels.json"
 ]

@@ -72,8 +72,13 @@ export function tokenize(grid: CharacterGrid): Token[] {
         while (c < grid.width && !isConnectorAt(r, c)) c++;
         const raw = grid.lines[r].slice(start, c).replace(/\s+$/, "");
         const anchors = nearbyColumnAnchors(r, start, c);
+        const splitAtGap = (midpoint: number) => {
+          const gaps = [...grid.lines[r].matchAll(/ {2,}/g)].map(match => ({ start: match.index!, end: match.index! + match[0].length }));
+          const nearest = gaps.filter(gap => gap.start > start && gap.end < c).sort((a, b) => Math.abs((a.start + a.end) / 2 - midpoint) - Math.abs((b.start + b.end) / 2 - midpoint))[0];
+          return nearest ? Math.round((nearest.start + nearest.end) / 2) : Math.floor(midpoint);
+        };
         const segments = anchors.length >= 2
-          ? [start, ...anchors.slice(1).map((anchor, index) => Math.floor((anchors[index] + anchor) / 2)), c]
+          ? [start, ...anchors.slice(1).map((anchor, index) => splitAtGap((anchors[index] + anchor) / 2)), c]
           : null;
         if (segments) {
           for (let index = 0; index < segments.length - 1; index++) {
