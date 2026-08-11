@@ -27,6 +27,11 @@ test("renders escaped labels as SVG text", () => {
   assert.match(svg, /marker-end/);
 });
 
+test("unicode horizontal arrow reaches the target-side port", () => {
+  const svg = asciiToSvg("Input → Output", { mode: "preserve" });
+  assert.match(svg, /M 89 38 L 92\.5 38 L 92\.5 38 L 96 38" marker-end="url\(#arrow\)"/);
+});
+
 test("convenience SVG API does not render plain prose", () => {
   assert.equal(asciiToSvg("This is explanatory prose, not a diagram."), "");
 });
@@ -82,4 +87,12 @@ test("branch routes preserve the horizontal trunk", () => {
   const rootCenter = svg.match(new RegExp(`<text x="([\\d.]+)" y="41"[^>]*>${fixture.expect.render.rootLabel}</text>`))?.[1];
   const expectedX = fixture.expect.render.rootCenterColumn * 9 + 24 + 4.5;
   assert.equal(rootCenter, String(expectedX));
+});
+
+test("cycle rails stay orthogonal when labels widen their nodes", () => {
+  const input = "              COMMERCIAL EVENT\n\n          ┌──────── Goods ────────┐\n          │                       ↓\n       Seller                   Buyer\n          ↑                       │\n          └──────── Money ────────┘";
+  const svg = asciiToSvg(input, { mode: "preserve" });
+  const paths = [...svg.matchAll(/<path class="edge" d="([^"]+)"/g)].map(match => match[1]);
+  assert.match(paths[0], /M 118\.5 136 L 118\.5 94 L 334\.5 94 L 334\.5 136/);
+  assert.match(paths[1], /M 334\.5 170 L 334\.5 206 L 118\.5 206 L 118\.5 170/);
 });

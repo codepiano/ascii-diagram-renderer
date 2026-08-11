@@ -21,6 +21,8 @@ for (const file of files) {
     const labels = new Map(diagram.nodes.map(node => [node.id, node.label]));
     const edges = diagram.edges.map(edge => [labels.get(edge.source), labels.get(edge.target)]);
     assert.deepEqual(edges, expect.edges ?? edges);
+    const edgeLabels = diagram.edges.map(edge => edge.label);
+    assert.deepEqual(edgeLabels, expect.edgeLabels ?? edgeLabels);
     const groups = diagram.groups.map(group => ({ kind: group.kind, parent: labels.get(group.parent), members: group.members.map(id => labels.get(id)) }));
     assert.deepEqual(groups, expect.groups ?? groups);
     assert.deepEqual(parsed.tokens.map(token => token.kind), expect.tokenKinds ?? parsed.tokens.map(token => token.kind));

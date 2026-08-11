@@ -28,8 +28,11 @@ export type DiagramEdge = {
   target: string;
   direction: "up" | "down" | "left" | "right";
   sourcePath: Point[];
-  sourceRoute?: "vertical" | "horizontal" | "orthogonal" | "branch";
+  sourceRoute?: "vertical" | "horizontal" | "orthogonal" | "branch" | "cycle";
   arrow?: "none" | "normal";
+  /** Text carried by a connection rather than a standalone diagram node. */
+  label?: string;
+  labelPoint?: Point;
 };
 
 export type DiagramGroup = { id: string; kind: "examples" | "group"; label?: string; parent?: string; members: string[]; sourceBounds?: Bounds };

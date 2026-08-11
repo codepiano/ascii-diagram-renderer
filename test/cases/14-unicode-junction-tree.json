@@ -1,0 +1,10 @@
+{
+  "name": "tree fan-out through a Unicode junction",
+  "input": "             FRAME\n               │\n     ┌─────────┼─────────┐\n     ↓         ↓         ↓\n   roles    relations   events\n     │\n     ↓\n lexical concepts",
+  "expect": {
+    "classification": "diagram",
+    "nodeLabels": ["FRAME", "roles", "relations", "events", "lexical concepts"],
+    "edges": [["FRAME", "roles"], ["FRAME", "relations"], ["FRAME", "events"], ["roles", "lexical concepts"]]
+  },
+  "options": { "mode": "preserve" }
+}

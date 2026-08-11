@@ -10,6 +10,13 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
     const anchors = new Map<string, { x?: number; y?: number }>();
     for (const edge of diagram.edges) {
       if (edge.sourcePath.length < 2) continue;
+      if (edge.sourceRoute === "cycle") {
+        const sourceRail = edge.sourcePath[1];
+        const targetRail = edge.sourcePath[2];
+        anchors.set(edge.source, { ...anchors.get(edge.source), x: sourceRail.col * cellWidth + padding + cellWidth / 2 });
+        anchors.set(edge.target, { ...anchors.get(edge.target), x: targetRail.col * cellWidth + padding + cellWidth / 2 });
+        continue;
+      }
       const anchor = edge.sourcePath[Math.floor(edge.sourcePath.length / 2)];
       if (edge.sourceRoute === "branch") {
         const source = edge.sourcePath[0];
@@ -49,31 +56,62 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
       y += position.h + 10;
     }
   }
-  const minX = Math.min(0, ...[...positions.values()].map(p => p.x)) - 14;
-  const maxX = Math.max(...[...positions.values()].map(p => p.x + p.w), 160) + padding, maxY = Math.max(...[...positions.values()].map(p => p.y + p.h), 80) + padding;
-  const point = (id: string, side: "start" | "end") => { const p = positions.get(id)!; return { x: p.x + p.w / 2, y: side === "start" ? p.y + p.h : p.y }; };
+  const cycleRoute = (e: Diagram["edges"][number]) => {
+    const routePoint = (p: { row: number; col: number }) => ({ x: p.col * cellWidth + padding + cellWidth / 2, y: p.row * cellHeight + padding + cellHeight / 2 });
+    const source = positions.get(e.source)!, target = positions.get(e.target)!;
+    const sourceCenter = centerPoint(source), targetCenter = centerPoint(target);
+    const isTopRail = e.sourcePath[1].row < e.sourcePath[0].row;
+    const sourcePort = { x: sourceCenter.x, y: isTopRail ? source.y : source.y + source.h };
+    const targetPort = { x: targetCenter.x, y: isTopRail ? target.y : target.y + target.h };
+    return [sourcePort, routePoint(e.sourcePath[1]), routePoint(e.sourcePath[2]), targetPort];
+  };
+  const centerPoint = (p: { x: number; y: number; w: number; h: number }) => ({ x: p.x + p.w / 2, y: p.y + p.h / 2 });
+  const cyclePoints = diagram.edges.filter(edge => edge.sourceRoute === "cycle" && options.mode !== "reflow").flatMap(cycleRoute);
+  const labelPoints = diagram.edges.filter(edge => edge.labelPoint).map(edge => ({ x: edge.labelPoint!.col * cellWidth + padding + cellWidth / 2, y: edge.labelPoint!.row * cellHeight + padding + cellHeight / 2 }));
+  const allPoints = [...[...positions.values()].flatMap(p => [{ x: p.x, y: p.y }, { x: p.x + p.w, y: p.y + p.h }]), ...cyclePoints, ...labelPoints];
+  const minX = Math.min(0, ...allPoints.map(point => point.x)) - 14;
+  const maxX = Math.max(...allPoints.map(point => point.x), 160) + padding;
+  const maxY = Math.max(...allPoints.map(point => point.y), 80) + padding;
+  const point = (id: string, side: "start" | "end", direction: Diagram["edges"][number]["direction"]) => {
+    const p = positions.get(id)!;
+    if (direction === "right") return { x: side === "start" ? p.x + p.w : p.x, y: p.y + p.h / 2 };
+    if (direction === "left") return { x: side === "start" ? p.x : p.x + p.w, y: p.y + p.h / 2 };
+    return { x: p.x + p.w / 2, y: side === "start" ? p.y + p.h : p.y };
+  };
   const sourcePoint = (e: Diagram["edges"][number], side: "start" | "end") => {
-    const fallback = point(e[side === "start" ? "source" : "target"], side);
+    const fallback = point(e[side === "start" ? "source" : "target"], side, e.direction);
     if (options.mode === "reflow" || e.sourcePath.length < 2) return fallback;
     const anchor = e.sourcePath[Math.floor(e.sourcePath.length / 2)];
-    const x = anchor.col * cellWidth + padding + cellWidth / 2;
     const node = positions.get(e[side === "start" ? "source" : "target"])!;
-    return { x, y: side === "start" ? node.y + node.h : node.y };
+    if (e.direction === "left" || e.direction === "right") {
+      return { x: side === "start" ? fallback.x : fallback.x, y: anchor.row * cellHeight + padding + cellHeight / 2 };
+    }
+    return { x: anchor.col * cellWidth + padding + cellWidth / 2, y: side === "start" ? node.y + node.h : node.y };
   };
   const paths = diagram.edges.map(e => {
+    if (e.sourceRoute === "cycle" && options.mode !== "reflow") {
+      const route = cycleRoute(e);
+      const marker = e.arrow === "normal" ? ` marker-end="url(#arrow)"` : "";
+      return `<path class="edge" d="M ${route.map(point => `${point.x} ${point.y}`).join(" L ")}"${marker}/>`;
+    }
     const a = sourcePoint(e, "start"), b = sourcePoint(e, "end");
-    const middle = (a.y + b.y) / 2;
+    const middleY = (a.y + b.y) / 2;
+    const middleX = (a.x + b.x) / 2;
     const branchPoint = e.sourceRoute === "branch" && options.mode !== "reflow" ? e.sourcePath[1] : undefined;
-    const branchY = branchPoint ? branchPoint.row * cellHeight + padding + cellHeight / 2 : middle;
+    const branchY = branchPoint ? branchPoint.row * cellHeight + padding + cellHeight / 2 : middleY;
     const branchSourceX = branchPoint ? e.sourcePath[0].col * cellWidth + padding + cellWidth / 2 : a.x;
     const branchTargetX = branchPoint ? branchPoint.col * cellWidth + padding + cellWidth / 2 : b.x;
     const d = branchPoint
       ? `M ${branchSourceX} ${a.y} L ${branchSourceX} ${branchY} L ${branchTargetX} ${branchY} L ${branchTargetX} ${b.y}`
       : e.direction === "left" || e.direction === "right"
-        ? `M ${a.x} ${a.y} L ${middle} ${a.y} L ${middle} ${b.y} L ${b.x} ${b.y}`
-        : `M ${a.x} ${a.y} L ${a.x} ${middle} L ${b.x} ${middle} L ${b.x} ${b.y}`;
+        ? `M ${a.x} ${a.y} L ${middleX} ${a.y} L ${middleX} ${b.y} L ${b.x} ${b.y}`
+        : `M ${a.x} ${a.y} L ${a.x} ${middleY} L ${b.x} ${middleY} L ${b.x} ${b.y}`;
     const marker = e.arrow === "normal" ? ` marker-end="url(#arrow)"` : "";
     return `<path class="edge" d="${d}"${marker}/>`;
+  }).join("");
+  const edgeLabels = diagram.edges.filter(edge => edge.label && edge.labelPoint).map(edge => {
+    const point = edge.labelPoint!;
+    return `<text class="edge-label" x="${point.col * cellWidth + padding + cellWidth / 2}" y="${point.row * cellHeight + padding + cellHeight / 2}" text-anchor="middle" dominant-baseline="middle">${esc(edge.label!)}</text>`;
   }).join("");
   const groups = diagram.groups.map(group => {
     const members = group.members.map(id => positions.get(id)).filter(Boolean) as Array<{ x: number; y: number; w: number; h: number }>;
@@ -83,7 +121,7 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
     return `<g class="group"><rect x="${left}" y="${top}" width="${right - left}" height="${bottom - top}" rx="10"/><text x="${left + 10}" y="${top + 14}">${esc(group.label ?? group.kind)}</text></g>`;
   }).join("");
   const nodes = diagram.nodes.map(n => { const p = positions.get(n.id)!; const shape = n.shape === "box" ? `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="6"/>` : `<rect class="text-node" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="6"/>`; return `<g class="node" data-node-id="${esc(n.id)}">${shape}<text x="${p.x + p.w / 2}" y="${p.y + p.h / 2}" text-anchor="middle" dominant-baseline="middle">${esc(n.label)}</text></g>`; }).join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} 0 ${maxX - minX} ${maxY}" role="img"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z"/></marker></defs><style>.edge{fill:none;stroke:#64748b;stroke-width:2}.group rect{fill:#f8fafc;stroke:#aab4c5;stroke-width:1.5;stroke-dasharray:5 4}.group text{font:11px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#748096}.node rect{fill:#fff;stroke:#334155;stroke-width:2}.node .text-node{fill:#f8fafc}.node text{font:${fontSize}px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#0f172a}</style>${groups}${paths}${nodes}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} 0 ${maxX - minX} ${maxY}" role="img"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z"/></marker></defs><style>.edge{fill:none;stroke:#64748b;stroke-width:2}.edge-label{font:${fontSize}px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#0f172a;paint-order:stroke;stroke:#f8fafc;stroke-width:8px;stroke-linejoin:round}.group rect{fill:#f8fafc;stroke:#aab4c5;stroke-width:1.5;stroke-dasharray:5 4}.group text{font:11px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#748096}.node rect{fill:#fff;stroke:#334155;stroke-width:2}.node .text-node{fill:#f8fafc}.node text{font:${fontSize}px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#0f172a}</style>${groups}${paths}${edgeLabels}${nodes}</svg>`;
 }
 
 export function renderLayoutedSvg(layouted: LayoutedDiagram, options: RenderOptions = {}): string {

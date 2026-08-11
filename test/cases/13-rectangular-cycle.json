@@ -1,0 +1,12 @@
+{
+  "name": "rectangular cycle with labels on its rails",
+  "input": "              COMMERCIAL EVENT\n\n          ┌──────── Goods ────────┐\n          │                       ↓\n       Seller                   Buyer\n          ↑                       │\n          └──────── Money ────────┘",
+  "expect": {
+    "classification": "diagram",
+    "nodeLabels": ["COMMERCIAL EVENT", "Seller", "Buyer"],
+    "edges": [["Seller", "Buyer"], ["Buyer", "Seller"]],
+    "edgeLabels": ["Goods", "Money"],
+    "svg": ["edge-label", ">Goods<", ">Money<"]
+  },
+  "options": { "mode": "preserve" }
+}

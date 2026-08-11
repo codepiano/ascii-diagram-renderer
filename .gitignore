@@ -1,4 +1,5 @@
 node_modules/
 dist/
+.control-panel/
 .DS_Store
 .omx/

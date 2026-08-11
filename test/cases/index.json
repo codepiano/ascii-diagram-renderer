@@ -10,5 +10,7 @@
   "09-markdown-list.json",
   "10-lines-without-arrows.json",
   "11-tree-branch.json",
-  "12-single-space-columns.json"
+  "12-single-space-columns.json",
+  "13-rectangular-cycle.json",
+  "14-unicode-junction-tree.json"
 ]

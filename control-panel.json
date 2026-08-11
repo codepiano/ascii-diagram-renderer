@@ -1,0 +1,25 @@
+{
+  "id": "ascii-diagram",
+  "name": "ASCII Diagram Renderer",
+  "workingDirectory": ".",
+  "initCommand": "./scripts/init.sh",
+  "installCommand": "./scripts/install.sh",
+  "startCommand": "./scripts/start.sh",
+  "stopCommand": "./scripts/stop.sh",
+  "statusCommand": "./scripts/status.sh",
+  "restartCommand": "./scripts/restart.sh",
+  "uninstallCommand": "./scripts/uninstall.sh",
+  "openHomepageCommand": "./scripts/open-homepage.sh",
+  "homepageUrl": "https://github.com/codepiano/ascii-diagram-renderer",
+  "notes": "将 ASCII 流程图解析为 Diagram IR 并渲染为 SVG，控制面板管理本地 Demo",
+  "scripts": {
+    "init": "./scripts/init.sh",
+    "install": "./scripts/install.sh",
+    "start": "./scripts/start.sh",
+    "stop": "./scripts/stop.sh",
+    "status": "./scripts/status.sh",
+    "restart": "./scripts/restart.sh",
+    "uninstall": "./scripts/uninstall.sh",
+    "openHomepage": "./scripts/open-homepage.sh"
+  }
+}

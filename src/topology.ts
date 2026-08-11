@@ -5,13 +5,67 @@ const distance = (a: Point, b: Point) => Math.abs(a.row - b.row) + Math.abs(a.co
 const nodeTokens = (tokens: Token[]) => tokens.filter((t): t is Extract<Token, { kind: "text" | "box" }> => t.kind === "text" || t.kind === "box");
 
 export function recoverTopology(tokens: Token[], source: { lines: string[]; width: number; height: number }): Diagram {
-  const nodes: DiagramNode[] = nodeTokens(tokens).map((token, i) => ({ id: `n${i + 1}`, label: token.kind === "box" ? token.label : token.text, shape: token.kind === "box" ? "box" : "text", sourceBounds: token.bounds }));
+  let nodes: DiagramNode[] = nodeTokens(tokens).map((token, i) => ({ id: `n${i + 1}`, label: token.kind === "box" ? token.label : token.text, shape: token.kind === "box" ? "box" : "text", sourceBounds: token.bounds }));
   const arrows = tokens.filter((t): t is Extract<Token, { kind: "arrow" }> => t.kind === "arrow");
   const lines = tokens.filter((t): t is Extract<Token, { kind: "line" }> => t.kind === "line");
   const horizontalRows = new Set(lines.filter(line => line.orientation === "horizontal").map(line => line.points[0].row));
   const edges: DiagramEdge[] = [];
   const groups: Diagram["groups"] = [];
+  const consumedArrows = new Set<Extract<Token, { kind: "arrow" }>>();
+
+  // Recognize a common ASCII idiom for a two-party commercial/event cycle:
+  // labels sit on the top/bottom rails, while arrowheads live on the side rails.
+  // The rails are intentionally not emitted as free edges: together they are one
+  // directed connection in each direction, and the rail text labels those edges.
+  const upArrows = arrows.filter(arrow => arrow.direction === "up");
+  const downArrows = arrows.filter(arrow => arrow.direction === "down");
+  for (const leftArrow of upArrows) for (const rightArrow of downArrows) {
+    if (leftArrow.point.col >= rightArrow.point.col) continue;
+    const top = Math.min(leftArrow.point.row, rightArrow.point.row);
+    const bottom = Math.max(leftArrow.point.row, rightArrow.point.row);
+    const leftNode = nodes.filter(node => center(node.sourceBounds).col <= leftArrow.point.col && center(node.sourceBounds).row >= top && center(node.sourceBounds).row <= bottom).sort((a, b) => distance(center(a.sourceBounds), leftArrow.point) - distance(center(b.sourceBounds), leftArrow.point))[0];
+    const rightNode = nodes.filter(node => center(node.sourceBounds).col >= rightArrow.point.col && center(node.sourceBounds).row >= top && center(node.sourceBounds).row <= bottom).sort((a, b) => distance(center(a.sourceBounds), rightArrow.point) - distance(center(b.sourceBounds), rightArrow.point))[0];
+    const railLabel = (side: "top" | "bottom") => nodes.filter(node => {
+      const nodeCenter = center(node.sourceBounds);
+      return nodeCenter.col > leftArrow.point.col && nodeCenter.col < rightArrow.point.col && (side === "top" ? nodeCenter.row < top : nodeCenter.row > bottom);
+    }).sort((a, b) => side === "top" ? b.sourceBounds.top - a.sourceBounds.top : a.sourceBounds.top - b.sourceBounds.top)[0];
+    const topLabel = railLabel("top");
+    const bottomLabel = railLabel("bottom");
+    if (!leftNode || !rightNode || !topLabel || !bottomLabel) continue;
+    const leftCenter = center(leftNode.sourceBounds), rightCenter = center(rightNode.sourceBounds);
+    edges.push(
+      { id: `e${edges.length + 1}`, source: leftNode.id, target: rightNode.id, direction: "right", sourcePath: [leftCenter, { row: topLabel.sourceBounds.top, col: leftArrow.point.col }, { row: topLabel.sourceBounds.top, col: rightArrow.point.col }, rightCenter], sourceRoute: "cycle", arrow: "normal", label: topLabel.label, labelPoint: center(topLabel.sourceBounds) },
+      { id: `e${edges.length + 2}`, source: rightNode.id, target: leftNode.id, direction: "left", sourcePath: [rightCenter, { row: bottomLabel.sourceBounds.bottom, col: rightArrow.point.col }, { row: bottomLabel.sourceBounds.bottom, col: leftArrow.point.col }, leftCenter], sourceRoute: "cycle", arrow: "normal", label: bottomLabel.label, labelPoint: center(bottomLabel.sourceBounds) }
+    );
+    nodes = nodes.filter(node => node.id !== topLabel.id && node.id !== bottomLabel.id);
+    consumedArrows.add(leftArrow);
+    consumedArrows.add(rightArrow);
+    break;
+  }
+  // A horizontal trunk followed by downward arrowheads is a tree fan-out even
+  // when its center is a Unicode junction such as ┼ (rather than a plain |).
+  // Recover it before individual-arrow recovery so all children share the trunk.
+  for (const horizontal of lines.filter(line => line.orientation === "horizontal")) {
+    const row = horizontal.points[0].row;
+    const left = horizontal.points[0].col;
+    const right = horizontal.points.at(-1)!.col;
+    const columns = [...new Set([
+      ...lines.filter(line => line.orientation === "vertical").flatMap(line => line.points.filter(point => point.row === row - 1 || point.row === row + 1).map(point => point.col)),
+      ...arrows.filter(arrow => arrow.direction === "down" && (arrow.point.row === row - 1 || arrow.point.row === row + 1)).map(arrow => arrow.point.col)
+    ])].filter(col => col >= left && col <= right);
+    const above = (col: number) => nodes.filter(node => node.sourceBounds.bottom < row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => b.sourceBounds.bottom - a.sourceBounds.bottom)[0];
+    const below = (col: number) => nodes.filter(node => node.sourceBounds.top > row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => a.sourceBounds.top - b.sourceBounds.top)[0];
+    const parent = columns.map(above).find(Boolean);
+    if (!parent) continue;
+    for (const col of columns) {
+      const target = below(col);
+      if (!target || edges.some(edge => edge.source === parent.id && edge.target === target.id)) continue;
+      const hasArrowhead = arrows.some(arrow => arrow.direction === "down" && (arrow.point.row === row - 1 || arrow.point.row === row + 1) && arrow.point.col === col);
+      edges.push({ id: `e${edges.length + 1}`, source: parent.id, target: target.id, direction: "down", sourcePath: [center(parent.sourceBounds), { row, col }, center(target.sourceBounds)], sourceRoute: "branch", arrow: hasArrowhead ? "normal" : "none" });
+    }
+  }
   for (const arrow of arrows) {
+    if (consumedArrows.has(arrow)) continue;
     const before = nodes.filter(n => center(n.sourceBounds).row < arrow.point.row || (center(n.sourceBounds).row === arrow.point.row && center(n.sourceBounds).col < arrow.point.col));
     const after = nodes.filter(n => center(n.sourceBounds).row > arrow.point.row || (center(n.sourceBounds).row === arrow.point.row && center(n.sourceBounds).col > arrow.point.col));
     const candidates = arrow.direction === "down" || arrow.direction === "up" ? [before.sort((a,b) => distance(center(b.sourceBounds), arrow.point) - distance(center(a.sourceBounds), arrow.point)).at(-1), after.sort((a,b) => distance(center(a.sourceBounds), arrow.point) - distance(center(b.sourceBounds), arrow.point))[0]] : [before.at(-1), after[0]];

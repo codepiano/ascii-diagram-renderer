@@ -8,6 +8,8 @@ const arrows: Record<string, "up" | "down" | "left" | "right"> = {
   "←": "left", "→": "right", "▶": "right"
 };
 const boxChars = new Set(["+", "┌", "┐", "└", "┘", "╭", "╮", "╰", "╯"]);
+const horizontalJunctions = new Set(["┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼"]);
+const verticalJunctions = new Set(["┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼"]);
 const connectors = new Set([...vertical, ...horizontal, ...boxChars, ...Object.keys(arrows)]);
 
 export function tokenize(grid: CharacterGrid): Token[] {
@@ -58,10 +60,11 @@ export function tokenize(grid: CharacterGrid): Token[] {
       const ch = at(r, c);
       if (used.has(`${r}:${c}`)) { c++; continue; }
       if (isArrowAt(r, c)) { tokens.push({ kind: "arrow", direction: arrows[ch], point: { row: r, col: c } }); c++; continue; }
-      if (vertical.has(ch) || horizontal.has(ch)) {
+      if (vertical.has(ch) || horizontal.has(ch) || horizontalJunctions.has(ch) || verticalJunctions.has(ch)) {
         const orientation = vertical.has(ch) ? "vertical" : "horizontal";
         const points: Point[] = [];
-        while (c < grid.width && (orientation === "vertical" ? vertical.has(at(r, c)) : horizontal.has(at(r, c)))) { points.push({ row: r, col: c++ }); }
+        const continues = (value: string) => orientation === "vertical" ? vertical.has(value) || verticalJunctions.has(value) : horizontal.has(value) || horizontalJunctions.has(value);
+        while (c < grid.width && continues(at(r, c))) { points.push({ row: r, col: c++ }); }
         tokens.push({ kind: "line", orientation, points }); continue;
       }
       if (!isConnectorAt(r, c) && !grid.isBlank({ row: r, col: c })) {
