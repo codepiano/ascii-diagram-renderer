@@ -1,7 +1,11 @@
-import type { Diagram, LayoutedDiagram, RenderOptions } from "./types.js";
+import { renderSvgV2 } from "./svg-v2.js";
+import type { Diagram, DiagramV2, LayoutedDiagram, RenderOptions } from "./types.js";
+
+export { renderSvgV2 } from "./svg-v2.js";
 
 const esc = (value: string) => value.replace(/[&<>\"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch]!));
-export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string {
+export function renderSvg(diagram: Diagram | DiagramV2, options: RenderOptions = {}): string {
+  if (diagram.version === "2") return renderSvgV2(diagram, options);
   const cellWidth = options.cellWidth ?? 9, cellHeight = options.cellHeight ?? 28, padding = options.padding ?? 24, fontSize = options.fontSize ?? 16;
   const positions = new Map<string, { x: number; y: number; w: number; h: number }>();
   if (options.mode === "reflow") diagram.nodes.forEach((n, i) => positions.set(n.id, { x: (i % 3) * 190 + padding, y: Math.floor(i / 3) * 100 + padding, w: Math.max(100, n.label.length * 9 + 28), h: 42 }));

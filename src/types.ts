@@ -68,6 +68,28 @@ export type DiagramEdge = {
 
 export type DiagramGroup = { id: string; kind: "examples" | "group"; label?: string; parent?: string; members: string[]; sourceBounds?: Bounds };
 
+export type EdgePort = "top" | "right" | "bottom" | "left";
+export type RecognitionProvenance = { recognizer: string; evidence: string[]; confidence: number };
+export type DiagramV2Edge = {
+  id: string;
+  source: string;
+  target: string;
+  direction: "up" | "down" | "left" | "right";
+  geometry: { kind: "polyline"; points: Point[]; sourcePort: EdgePort; targetPort: EdgePort };
+  markerEnd: "none" | "arrow";
+  label?: { text: string; point: Point };
+  provenance: RecognitionProvenance;
+};
+export type DiagramV2Group = Omit<DiagramGroup, "id"> & { id: string; provenance: RecognitionProvenance };
+export type DiagramV2 = {
+  version: "2";
+  nodes: DiagramNode[];
+  edges: DiagramV2Edge[];
+  groups: DiagramV2Group[];
+  diagnostics: Diagnostic[];
+  source: { lines: string[]; width: number; height: number };
+};
+
 export type Diagram = {
   nodes: DiagramNode[];
   edges: DiagramEdge[];

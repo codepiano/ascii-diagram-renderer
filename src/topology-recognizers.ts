@@ -1,7 +1,7 @@
 import type { CanonicalEdge, CanonicalGroup } from "./canonical.js";
 import type { GlyphComponent, GlyphGraph } from "./glyph-graph.js";
 import type { RecognitionCandidate } from "./recognition.js";
-import type { Bounds, DiagramNode, Point, Token } from "./types.js";
+import type { Bounds, DiagramNode, EdgePort, Point, Token } from "./types.js";
 
 export type TopologyContext = {
   nodes: DiagramNode[];
@@ -10,8 +10,8 @@ export type TopologyContext = {
   glyphs: GlyphGraph;
 };
 
-type ProposedEdge = Omit<CanonicalEdge, "provenance">;
-type ProposedGroup = Omit<CanonicalGroup, "provenance">;
+type ProposedEdge = Omit<CanonicalEdge, "id" | "provenance">;
+type ProposedGroup = Omit<CanonicalGroup, "id" | "provenance">;
 export type NodeMerge = { primary: string; members: string[]; label: string; sourceBounds: Bounds };
 export type EdgeInterpretation = { edges: ProposedEdge[]; excludeNodes?: string[] };
 export type NodeInterpretation = { merge: NodeMerge };
@@ -34,12 +34,17 @@ const componentForPoints = (glyphs: GlyphGraph, points: Point[]) => {
 const adjacentComponents = (glyphs: GlyphGraph, point: Point) => glyphs.components().filter(component => component.cells.some(cell => distance(cell.point, point) === 1));
 
 const canonicalEdge = (
-  edge: Omit<ProposedEdge, "geometry" | "markerEnd"> & { points: Point[]; arrow: boolean }
+  edge: Omit<ProposedEdge, "geometry" | "markerEnd"> & { points: Point[]; arrow: boolean; sourcePort?: EdgePort; targetPort?: EdgePort }
 ): ProposedEdge => ({
   source: edge.source,
   target: edge.target,
   direction: edge.direction,
-  geometry: { kind: "polyline", points: edge.points },
+  geometry: {
+    kind: "polyline",
+    points: edge.points,
+    sourcePort: edge.sourcePort ?? (edge.direction === "right" ? "right" : edge.direction === "left" ? "left" : edge.direction === "up" ? "top" : "bottom"),
+    targetPort: edge.targetPort ?? (edge.direction === "right" ? "left" : edge.direction === "left" ? "right" : edge.direction === "up" ? "bottom" : "top")
+  },
   markerEnd: edge.arrow ? "arrow" : "none",
   ...(edge.label ? { label: edge.label } : {})
 });
@@ -110,8 +115,8 @@ export function recognizeCycles(context: TopologyContext): EdgeCandidate[] {
       value: {
         excludeNodes: [topLabel.id, bottomLabel.id],
         edges: [
-          canonicalEdge({ source: leftNode.id, target: rightNode.id, direction: "right", points: [center(leftNode.sourceBounds), { row: topLabel.sourceBounds.top, col: leftArrow.point.col }, { row: topLabel.sourceBounds.top, col: rightArrow.point.col }, center(rightNode.sourceBounds)], arrow: true, label: { text: topLabel.label, point: center(topLabel.sourceBounds) } }),
-          canonicalEdge({ source: rightNode.id, target: leftNode.id, direction: "left", points: [center(rightNode.sourceBounds), { row: bottomLabel.sourceBounds.bottom, col: rightArrow.point.col }, { row: bottomLabel.sourceBounds.bottom, col: leftArrow.point.col }, center(leftNode.sourceBounds)], arrow: true, label: { text: bottomLabel.label, point: center(bottomLabel.sourceBounds) } })
+          canonicalEdge({ source: leftNode.id, target: rightNode.id, direction: "right", points: [center(leftNode.sourceBounds), { row: topLabel.sourceBounds.top, col: leftArrow.point.col }, { row: topLabel.sourceBounds.top, col: rightArrow.point.col }, center(rightNode.sourceBounds)], sourcePort: "top", targetPort: "top", arrow: true, label: { text: topLabel.label, point: center(topLabel.sourceBounds) } }),
+          canonicalEdge({ source: rightNode.id, target: leftNode.id, direction: "left", points: [center(rightNode.sourceBounds), { row: bottomLabel.sourceBounds.bottom, col: rightArrow.point.col }, { row: bottomLabel.sourceBounds.bottom, col: leftArrow.point.col }, center(leftNode.sourceBounds)], sourcePort: "bottom", targetPort: "bottom", arrow: true, label: { text: bottomLabel.label, point: center(bottomLabel.sourceBounds) } })
         ]
       }
     });
@@ -141,7 +146,8 @@ export function recognizeArrowBranches(context: TopologyContext): EdgeCandidate[
     const evidence = [...(trunk ? [componentKey(trunk)] : [evidenceKey(tokens, horizontal)]), ...downArrows.map(arrow => evidenceKey(tokens, arrow)), ...downArrows.flatMap(arrow => adjacentComponents(glyphs, arrow.point).map(componentKey))];
     const edges = pairs.map(([parent, target]) => {
       const col = targetColumns[targets.indexOf(target)] ?? sourceColumns[parents.indexOf(parent)];
-      return canonicalEdge({ source: parent.id, target: target.id, direction: "down", points: [center(parent.sourceBounds), { row, col }, center(target.sourceBounds)], arrow: true });
+      const sourceCenter = center(parent.sourceBounds), targetCenter = center(target.sourceBounds);
+      return canonicalEdge({ source: parent.id, target: target.id, direction: "down", points: [sourceCenter, { row, col: sourceCenter.col }, { row, col }, { row, col: targetCenter.col }, targetCenter], arrow: true });
     });
     candidates.push({ id: `arrow-branch:${row}:${left}`, recognizer: "arrow-branch", priority: 80, confidence: 0.96, consumes: evidence, evidence, value: { edges } });
   }
@@ -161,7 +167,9 @@ export function recognizeArrows(context: TopologyContext): EdgeCandidate[] {
     const target = arrow.direction === "up" || arrow.direction === "left" ? candidates[0] : candidates[1];
     if (!source || !target || source.id === target.id) return [];
     const evidence = [evidenceKey(tokens, arrow), ...adjacentComponents(glyphs, arrow.point).map(componentKey)];
-    return [{ id: `arrow:${arrow.point.row}:${arrow.point.col}`, recognizer: "arrow", priority: 60, confidence: 0.9, consumes: evidence, evidence, value: { edges: [canonicalEdge({ source: source.id, target: target.id, direction: arrow.direction, points: [center(source.sourceBounds), arrow.point, center(target.sourceBounds)], arrow: true })] } }];
+    const sourceCenter = center(source.sourceBounds), targetCenter = center(target.sourceBounds);
+    const points = [sourceCenter, arrow.point, arrow.point, targetCenter];
+    return [{ id: `arrow:${arrow.point.row}:${arrow.point.col}`, recognizer: "arrow", priority: 60, confidence: 0.9, consumes: evidence, evidence, value: { edges: [canonicalEdge({ source: source.id, target: target.id, direction: arrow.direction, points, arrow: true })] } }];
   });
 }
 
@@ -190,7 +198,9 @@ export function recognizeLineEdges(context: TopologyContext): EdgeCandidate[] {
     const evidence = [componentKey(component)];
     const path = glyphs.paths(component).sort((a, b) => b.points.length - a.points.length)[0];
     const middle = path?.points[Math.floor(path.points.length / 2)] ?? component.cells[Math.floor(component.cells.length / 2)].point;
-    candidates.push({ id: `${recognizer}:${bounds.top}:${bounds.left}`, recognizer, priority: 40, confidence: 0.82, consumes: evidence, evidence, value: { edges: [canonicalEdge({ source: source.id, target: target.id, direction: vertical ? "down" : "right", points: [center(source.sourceBounds), middle, center(target.sourceBounds)], arrow: false })] } });
+    const sourceCenter = center(source.sourceBounds), targetCenter = center(target.sourceBounds);
+    const points = [sourceCenter, middle, middle, targetCenter];
+    candidates.push({ id: `${recognizer}:${bounds.top}:${bounds.left}`, recognizer, priority: 40, confidence: 0.82, consumes: evidence, evidence, value: { edges: [canonicalEdge({ source: source.id, target: target.id, direction: vertical ? "down" : "right", points, arrow: false })] } });
   }
   return candidates;
 }
@@ -217,7 +227,10 @@ export function recognizeLineBranches(context: TopologyContext): EdgeCandidate[]
     if (!parent || !branches.length) continue;
     const trunk = componentForPoints(glyphs, horizontal.points);
     const evidence = trunk ? [componentKey(trunk)] : [evidenceKey(tokens, horizontal), ...adjacentLines.map(line => evidenceKey(tokens, line))];
-    const edges = branches.map(branch => canonicalEdge({ source: parent.id, target: branch.target!.id, direction: "down", points: [center(parent.sourceBounds), { row, col: branch.col }, center(branch.target!.sourceBounds)], arrow: false }));
+    const edges = branches.map(branch => {
+      const sourceCenter = center(parent.sourceBounds), targetCenter = center(branch.target!.sourceBounds);
+      return canonicalEdge({ source: parent.id, target: branch.target!.id, direction: "down", points: [sourceCenter, { row, col: sourceCenter.col }, { row, col: branch.col }, { row, col: targetCenter.col }, targetCenter], arrow: false });
+    });
     candidates.push({ id: `line-branch:${row}:${left}`, recognizer: "line-branch", priority: 50, confidence: 0.9, consumes: evidence, evidence, value: { edges } });
   }
   return candidates;

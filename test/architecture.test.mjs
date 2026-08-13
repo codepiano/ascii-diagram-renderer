@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyDiagram, parseAscii } from "../dist/core.js";
+import { classifyDiagram, parseAscii, parseAsciiV2 } from "../dist/core.js";
 import { GlyphGraph } from "../dist/glyph-graph.js";
 import { resolveCandidates } from "../dist/recognition.js";
-import { SourceDocument } from "../dist/source.js";
+import { displayWidth, SourceDocument } from "../dist/source.js";
+import { renderSvg } from "../dist/svg.js";
 
 test("glyph graph records four-way junction connectivity", () => {
   const source = new SourceDocument(" │\n─┼─\n │");
@@ -63,4 +64,54 @@ test("classification consumes ParseAnalysis directly", () => {
   const analysis = parseAscii("A\n---\nB", { detection: "lenient" }).analysis;
   assert.equal(classifyDiagram(analysis, { detection: "strict" }).kind, "text");
   assert.equal(classifyDiagram(analysis, { detection: "lenient" }).kind, "maybe");
+});
+
+test("Diagram v2 ids survive unrelated insertions while v1 ids stay compatible", () => {
+  const original = parseAsciiV2("A → B").diagram;
+  const withIntroduction = parseAsciiV2("Introduction\n\nA → B").diagram;
+  const originalIds = new Map(original.nodes.map(node => [node.label, node.id]));
+  const insertedIds = new Map(withIntroduction.nodes.map(node => [node.label, node.id]));
+  assert.equal(insertedIds.get("A"), originalIds.get("A"));
+  assert.equal(insertedIds.get("B"), originalIds.get("B"));
+  assert.equal(withIntroduction.edges[0].id, original.edges[0].id);
+  assert.deepEqual(parseAscii("A → B").diagram.nodes.map(node => node.id), ["n1", "n2"]);
+  assert.equal(parseAscii("A → B").diagram.edges[0].id, "e1");
+});
+
+test("Diagram v2 exposes generic ports and renders without legacy route names", () => {
+  const diagram = parseAsciiV2("A → B").diagram;
+  assert.equal(diagram.version, "2");
+  assert.equal(diagram.edges[0].geometry.sourcePort, "right");
+  assert.equal(diagram.edges[0].geometry.targetPort, "left");
+  assert.equal("sourceRoute" in diagram.edges[0], false);
+  const svg = renderSvg(diagram, { mode: "preserve" });
+  assert.match(svg, /marker-end/);
+  assert.match(svg, new RegExp(`data-node-id="${diagram.nodes[0].id}"`));
+});
+
+test("display columns account for CJK and emoji in Diagram v2 layout", () => {
+  const source = new SourceDocument("中文 → B");
+  assert.equal(displayWidth("A中文😀"), 7);
+  assert.equal(displayWidth("👨‍👩‍👧‍👦"), 2);
+  assert.equal(displayWidth("🇨🇳"), 2);
+  assert.equal(source.displayColumn(0, 3), 5);
+  const svg = renderSvg(parseAsciiV2("中文 → B").diagram, { mode: "preserve" });
+  assert.match(svg, /width="56"/);
+});
+
+test("Diagram v2 generic geometry covers branches, cycles, labels, and groups", () => {
+  const branch = parseAsciiV2("     Root\n      |\n  ---------\n  |   |   |\n  A   B   C").diagram;
+  assert.equal(branch.edges.length, 3);
+  assert.ok(branch.edges.every(edge => edge.geometry.points.length >= 4));
+  assert.doesNotMatch(JSON.stringify(branch), /sourceRoute/);
+  assert.equal((renderSvg(branch).match(/<path class="edge"/g) ?? []).length, 3);
+
+  const cycleInput = "              COMMERCIAL EVENT\n\n          ┌──────── Goods ────────┐\n          │                       ↓\n       Seller                   Buyer\n          ↑                       │\n          └──────── Money ────────┘";
+  const cycle = parseAsciiV2(cycleInput).diagram;
+  assert.deepEqual(cycle.edges.map(edge => [edge.geometry.sourcePort, edge.geometry.targetPort]), [["top", "top"], ["bottom", "bottom"]]);
+  assert.match(renderSvg(cycle), />Goods<|>Money</);
+
+  const examples = parseAsciiV2("A\n|\nB\n\none\ntwo").diagram;
+  assert.equal(examples.groups[0].kind, "examples");
+  assert.match(renderSvg(examples), /class="group"/);
 });
