@@ -1,4 +1,4 @@
-import type { Bounds, Diagram, Point, PrimitiveDocument, ValidationIssue } from "./types.js";
+import type { Bounds, Diagram, NodeRegion, Point, PrimitiveDocument, ValidationIssue } from "./types.js";
 
 const issue = (code: string, path: string, message: string): ValidationIssue => ({ code, path, message });
 const validPoint = (point: Point) => Number.isInteger(point.row) && point.row >= 0 && Number.isInteger(point.col) && point.col >= 0;
@@ -16,12 +16,12 @@ export function validatePrimitiveDocument(document: PrimitiveDocument): Validati
   const primitiveIds = document.items.map(item => item.id);
   for (const id of duplicateIds(primitiveIds)) issues.push(issue("DUPLICATE_PRIMITIVE_ID", "items", `Primitive id ${id} is not unique.`));
   const expectedByKind = {
-    text: new Set(document.texts.map(item => item.id)),
+    text: new Set(document.textRuns.map(item => item.id)),
     box: new Set(document.boxes.map(item => item.id)),
     arrow: new Set(document.arrows.map(item => item.id)),
     connector: new Set(document.connectors.map(item => item.id))
   };
-  for (const [kind, entries] of Object.entries({ text: document.texts, box: document.boxes, arrow: document.arrows, connector: document.connectors })) {
+  for (const [kind, entries] of Object.entries({ text: document.textRuns, box: document.boxes, arrow: document.arrows, connector: document.connectors })) {
     for (const id of duplicateIds(entries.map(entry => entry.id))) {
       issues.push(issue("DUPLICATE_PRIMITIVE_INDEX_ID", `${kind}s`, `${kind} primitive id ${id} is not unique.`));
     }
@@ -37,7 +37,7 @@ export function validatePrimitiveDocument(document: PrimitiveDocument): Validati
     }
   }
   const itemIds = new Set(primitiveIds);
-  for (const [kind, entries] of Object.entries({ text: document.texts, box: document.boxes, arrow: document.arrows, connector: document.connectors })) {
+  for (const [kind, entries] of Object.entries({ text: document.textRuns, box: document.boxes, arrow: document.arrows, connector: document.connectors })) {
     for (const [index, entry] of entries.entries()) if (!itemIds.has(entry.id)) {
       issues.push(issue("PRIMITIVE_INDEX_MISMATCH", `${kind}s[${index}]`, `${entry.id} is missing from items.`));
     }
@@ -106,6 +106,36 @@ export function validateDiagram(diagram: Diagram, primitives?: PrimitiveDocument
   return issues;
 }
 
+export function validateNodeRegions(regions: NodeRegion[], primitives: PrimitiveDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const id of duplicateIds(regions.map(region => region.id))) {
+    issues.push(issue("DUPLICATE_NODE_REGION_ID", "regions", `Node region id ${id} is not unique.`));
+  }
+  const textRuns = new Map(primitives.textRuns.map(run => [run.id, run]));
+  const owners = new Map<string, string>();
+  for (const [regionIndex, region] of regions.entries()) {
+    if (!region.runIds.length) issues.push(issue("EMPTY_NODE_REGION", `regions[${regionIndex}].runIds`, "Node regions must contain at least one TextRun."));
+    if (!validBounds(region.bounds)) issues.push(issue("INVALID_BOUNDS", `regions[${regionIndex}].bounds`, "Node region bounds must be valid."));
+    for (const [runIndex, runId] of region.runIds.entries()) {
+      const run = textRuns.get(runId);
+      if (!run) {
+        issues.push(issue("MISSING_TEXT_RUN", `regions[${regionIndex}].runIds[${runIndex}]`, `Unknown TextRun ${runId}.`));
+        continue;
+      }
+      const owner = owners.get(runId);
+      if (owner) issues.push(issue("TEXT_RUN_IN_MULTIPLE_REGIONS", `regions[${regionIndex}].runIds[${runIndex}]`, `${runId} is already owned by ${owner}.`));
+      else owners.set(runId, region.id);
+      if (!pointInBounds({ row: run.bounds.top, col: run.bounds.left }, region.bounds) || !pointInBounds({ row: run.bounds.bottom, col: run.bounds.right }, region.bounds)) {
+        issues.push(issue("TEXT_RUN_OUT_OF_REGION_BOUNDS", `regions[${regionIndex}].runIds[${runIndex}]`, `${runId} lies outside its node region.`));
+      }
+    }
+  }
+  for (const runId of textRuns.keys()) if (!owners.has(runId)) {
+    issues.push(issue("UNASSIGNED_TEXT_RUN", "regions", `${runId} is not assigned to a node region.`));
+  }
+  return issues;
+}
+
 export class ParseInvariantError extends Error {
   constructor(readonly issues: ValidationIssue[]) {
     super(`Parser produced ${issues.length} invalid artifact${issues.length === 1 ? "" : "s"}.`);
@@ -113,7 +143,7 @@ export class ParseInvariantError extends Error {
   }
 }
 
-export function assertValidParseArtifacts(primitives: PrimitiveDocument, diagram: Diagram): void {
-  const issues = [...validatePrimitiveDocument(primitives), ...validateDiagram(diagram, primitives)];
+export function assertValidParseArtifacts(primitives: PrimitiveDocument, regions: NodeRegion[], diagram: Diagram): void {
+  const issues = [...validatePrimitiveDocument(primitives), ...validateNodeRegions(regions, primitives), ...validateDiagram(diagram, primitives)];
   if (issues.length) throw new ParseInvariantError(issues);
 }

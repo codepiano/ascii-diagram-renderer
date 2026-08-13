@@ -1,4 +1,5 @@
 import type { RecognitionCandidate } from "./recognition.js";
+import { recognizeMultilineRegions, recognizeSingleLineRegions, type NodeRegionContext } from "./node-regions.js";
 import {
   recognizeArrows,
   recognizeArrowBranches,
@@ -6,13 +7,11 @@ import {
   recognizeExampleGroups,
   recognizeLineBranches,
   recognizeLineEdges,
-  recognizeMultilineNodes,
   type EdgeInterpretation,
   type GroupInterpretation,
-  type NodeInterpretation,
   type TopologyContext
 } from "./topology-recognizers.js";
-import type { DiagramNode, PrimitiveDocument, RecognitionPhase, SemanticProfile } from "./types.js";
+import type { NodeRegionInterpretation, RecognitionPhase, SemanticProfile } from "./types.js";
 
 type RecognizerProfile = "structural" | Exclude<SemanticProfile, "none">;
 type DefinitionBase = {
@@ -24,7 +23,7 @@ type DefinitionBase = {
 };
 export type NodeRecognizerDefinition = DefinitionBase & {
   phase: "node";
-  recognize(nodes: DiagramNode[], primitives: PrimitiveDocument): RecognitionCandidate<NodeInterpretation>[];
+  recognize(context: NodeRegionContext): RecognitionCandidate<NodeRegionInterpretation>[];
 };
 export type EdgeRecognizerDefinition = DefinitionBase & {
   phase: "edge";
@@ -38,7 +37,8 @@ export type RecognizerDefinition = NodeRecognizerDefinition | EdgeRecognizerDefi
 
 /** The parser's extension inventory. Topology orchestration depends only on phases, not recognizer names. */
 export const recognizerRegistry: readonly RecognizerDefinition[] = [
-  { id: "multiline-node", outputs: ["multiline-node"], phase: "node", profile: "structural", minimumConfidence: 0.6, recognize: recognizeMultilineNodes },
+  { id: "multiline-region", outputs: ["multiline-region"], phase: "node", profile: "structural", minimumConfidence: 0.7, recognize: recognizeMultilineRegions },
+  { id: "single-line-region", outputs: ["single-line-region"], phase: "node", profile: "structural", minimumConfidence: 0, recognize: recognizeSingleLineRegions },
   { id: "cycle", outputs: ["cycle"], phase: "edge", profile: "structural", minimumConfidence: 0.6, recognize: recognizeCycles },
   { id: "arrow-branch", outputs: ["arrow-branch"], phase: "edge", profile: "structural", minimumConfidence: 0.6, recognize: recognizeArrowBranches },
   { id: "arrow", outputs: ["arrow"], phase: "edge", profile: "structural", minimumConfidence: 0.6, recognize: recognizeArrows },
@@ -55,7 +55,7 @@ const withPolicy = <T>(definition: DefinitionBase, candidates: RecognitionCandid
   }
   const value = candidate.value as Record<string, unknown> | null;
   const validValue = definition.phase === "node"
-    ? Boolean(value && "merge" in value)
+    ? Boolean(value && "region" in value)
     : definition.phase === "edge"
       ? Boolean(value && Array.isArray(value.edges))
       : Boolean(value && Array.isArray(value.members));
@@ -75,10 +75,10 @@ export class RecognizerRunner {
     }
   }
 
-  runNodes(nodes: DiagramNode[], primitives: PrimitiveDocument, semanticProfile: SemanticProfile) {
+  runNodes(context: NodeRegionContext, semanticProfile: SemanticProfile) {
     return this.definitions
     .filter((definition): definition is NodeRecognizerDefinition => definition.phase === "node" && enabled(definition, semanticProfile))
-    .flatMap(definition => withPolicy(definition, definition.recognize(nodes, primitives)));
+    .flatMap(definition => withPolicy(definition, definition.recognize(context)));
   }
 
   runEdges(context: TopologyContext, semanticProfile: SemanticProfile) {

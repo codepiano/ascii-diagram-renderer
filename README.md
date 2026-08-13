@@ -116,7 +116,7 @@ const svg = asciiToSvg(flow, {
 
 ### `parseAscii(input, options?)`
 
-返回 `{ primitives, diagram, classification, analysis }`。`options.detection` 可为：
+返回 `{ primitives, regions, diagram, classification, analysis }`。`options.detection` 可为：
 
 - `"strict"`：要求恢复出节点关系或发现强结构证据，适合自动渲染（`asciiToSvg` 固定使用该模式）。
 - `"lenient"`：未恢复出关系但存在多个节点和图形符号时返回 `maybe`，适合人工确认流程。
@@ -136,18 +136,21 @@ const svg = asciiToSvg(flow, {
 
 `Diagram` 是唯一 IR：节点、边和分组使用稳定内容 ID；edge 使用通用 polyline geometry，并在 edge/group 上保留识别 provenance。渲染器直接消费该结构，不存在另一套兼容 IR 或 recognizer 专用路由字段。
 
-`primitives` 是带独立版本号的可序列化源事实文档，包含 text、box、arrow 和 connector component；connector 具有 cells、端点、junction 和 paths，供诊断和后续 recognizer 使用。
+`primitives` 是带独立版本号的可序列化源事实文档，包含 TextRun、box、arrow 和 connector component；connector 具有 cells、端点、junction 和 paths，供诊断和后续 recognizer 使用。
+
+`regions` 是 TextRun 到 DiagramNode 之间的区域裁决结果。行内文字先形成单行 TextRun；单行 region 始终作为保守候选，多行 recognizer 再按相邻行、水平重叠、中心对齐以及上下 connector 锚点提出组合候选。connector 和 box border 是硬屏障，区域增长不会跨越它们；多行候选置信度不足时，resolver 会保留原来的单行 regions。
 
 解析器会在返回前检查 primitive 与 Diagram 的结构不变量。调用方在读取缓存或处理外部 IR 时，也可以显式使用校验器：
 
 ```ts
-import { validateDiagram, validatePrimitiveDocument } from "ascii-diagram-renderer/core";
+import { validateDiagram, validateNodeRegions, validatePrimitiveDocument } from "ascii-diagram-renderer/core";
 
 const primitiveIssues = validatePrimitiveDocument(primitives);
+const regionIssues = validateNodeRegions(regions, primitives);
 const diagramIssues = validateDiagram(diagram, primitives);
 ```
 
-校验覆盖版本、ID 唯一性、source dimensions、引用完整性、polyline geometry、provenance 和 edge evidence 可追溯性；返回值是带 `code`、`path` 和 `message` 的问题数组。
+校验覆盖版本、ID 唯一性、TextRun 区域归属、source dimensions、引用完整性、polyline geometry、provenance 和 edge evidence 可追溯性；返回值是带 `code`、`path` 和 `message` 的问题数组。
 
 `analysis` 用来解释解析过程，而不改变 Diagram：
 
@@ -176,10 +179,11 @@ const diagramIssues = validateDiagram(diagram, primitives);
 
 1. `SourceDocument` 统一换行、Unicode 字符坐标和文本切片。
 2. `GlyphGraph` 将 `│`、`─`、`┼` 等字符表示为带 north/east/south/west 端口的二维连接图，并生成 connector components、端点、junction 和可追踪路径。
-3. primitive extraction 一次扫描文本、盒子和箭头，并将它们与 GlyphGraph 连接组件统一为可序列化的 `PrimitiveDocument`；不存在另一套 token 中间模型。
-4. recognizer registry 声明每个 recognizer 的 phase、structural/semantic profile 和最低置信度，topology 只按 phase 调度。
-5. recognizer 只消费 primitive 与节点上下文，提交带置信度、证据和资源占用的候选解释；resolver 按明确优先级和证据冲突选择解释，注册顺序不决定结果。
-6. resolver 的结果直接形成唯一 `Diagram`，validator 检查结构不变量，分类器读取同一次裁决产生的 `ParseAnalysis`，SVG renderer 直接消费 Diagram。
+3. primitive extraction 一次扫描行内 TextRun、盒子和箭头，并将它们与 GlyphGraph 连接组件统一为可序列化的 `PrimitiveDocument`；不存在另一套 token 中间模型。
+4. node-region recognizer 以 TextRun 为基本单元做带权纵向区域增长；单行和多行候选通过 TextRun evidence 冲突交给 resolver 裁决。
+5. recognizer registry 声明每个 recognizer 的 phase、structural/semantic profile、允许的输出类型和最低置信度，topology 只按 phase 调度。
+6. edge/group recognizer 消费已经裁决的 nodes 与 primitives，resolver 按明确优先级和证据冲突选择解释，注册顺序不决定结果。
+7. resolver 的结果直接形成唯一 `Diagram`，validator 检查结构不变量，分类器读取同一次裁决产生的 `ParseAnalysis`，SVG renderer 直接消费 Diagram。
 
 新增内置语法时，应增加独立 recognizer、registry declaration 和 fixture，而不是修改 topology orchestration。纯领域约定应放入显式 semantic profile，而不是混入结构 recognizer。source 与 glyph 保持为包内实现细节；公共数据边界是 `PrimitiveDocument`、`ParseAnalysis` 与 `Diagram`。
 

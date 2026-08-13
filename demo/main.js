@@ -44,7 +44,7 @@ function render() {
     preview.replaceChildren();
     if (shouldRender) preview.innerHTML = latestSvg;
     else preview.textContent = `未渲染：${parsed.classification.reasons.join("；")}`;
-    irOutput.textContent = JSON.stringify({ classification: parsed.classification, analysis: parsed.analysis, diagram: parsed.diagram }, null, 2);
+    irOutput.textContent = JSON.stringify({ classification: parsed.classification, analysis: parsed.analysis, regions: parsed.regions, diagram: parsed.diagram }, null, 2);
     primitiveOutput.replaceChildren(...parsed.primitives.items.map(primitive => {
       const item = document.createElement("span");
       item.className = `primitive primitive-${primitive.kind}`;

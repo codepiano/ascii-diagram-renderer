@@ -40,7 +40,7 @@ export type ParseAnalysis = {
   diagnostics: Diagnostic[];
 };
 
-export type PrimitiveText = { id: string; kind: "text"; text: string; bounds: Bounds };
+export type TextRun = { id: string; kind: "text"; text: string; bounds: Bounds };
 export type PrimitiveBox = { id: string; kind: "box"; label: string; bounds: Bounds };
 export type PrimitiveArrow = { id: string; kind: "arrow"; direction: "up" | "down" | "left" | "right"; point: Point };
 export type ConnectorPort = "north" | "east" | "south" | "west";
@@ -55,15 +55,24 @@ export type PrimitiveConnector = {
   junctions: Point[];
   paths: PrimitiveConnectorPath[];
 };
-export type SourcePrimitive = PrimitiveText | PrimitiveBox | PrimitiveArrow | PrimitiveConnector;
+export type SourcePrimitive = TextRun | PrimitiveBox | PrimitiveArrow | PrimitiveConnector;
 export type PrimitiveDocument = {
   version: "1";
   items: SourcePrimitive[];
-  texts: PrimitiveText[];
+  textRuns: TextRun[];
   boxes: PrimitiveBox[];
   arrows: PrimitiveArrow[];
   connectors: PrimitiveConnector[];
 };
+
+export type NodeRegion = {
+  id: string;
+  kind: "text";
+  runIds: string[];
+  label: string;
+  bounds: Bounds;
+};
+export type NodeRegionInterpretation = { region: NodeRegion };
 
 export type DiagramNode = {
   id: string;

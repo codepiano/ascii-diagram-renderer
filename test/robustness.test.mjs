@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseAscii, validateDiagram, validatePrimitiveDocument } from "../dist/core.js";
+import { parseAscii, validateDiagram, validateNodeRegions, validatePrimitiveDocument } from "../dist/core.js";
 import { CharacterGrid } from "../dist/grid.js";
 import { GlyphGraph } from "../dist/glyph-graph.js";
 import { extractPrimitives } from "../dist/primitives.js";
@@ -55,6 +55,23 @@ test("equivalent ASCII and Unicode connectors preserve semantics", () => {
   assert.deepEqual(semantics(unicodeHorizontal), semantics(asciiHorizontal));
 
   assert.deepEqual(parseAscii("A < B").diagram.nodes.map(node => node.label), ["A < B"]);
+});
+
+test("TextRuns grow into conservative multiline node regions", () => {
+  const columns = parseAscii("  |             |\nalpha one     beta one\nalpha two     beta two\n  |             |");
+  assert.deepEqual(columns.regions.map(region => region.label), ["alpha one\nalpha two", "beta one\nbeta two"]);
+  assert.ok(columns.regions.every(region => region.runIds.length === 2));
+  assert.ok(columns.diagram.nodes.every(node => Array.isArray(node.metadata?.runIds)));
+  assert.ok(columns.analysis.accepted.filter(item => item.recognizer === "multiline-region").length === 2);
+  assert.ok(columns.analysis.rejected.filter(item => item.recognizer === "single-line-region" && item.reason === "conflict").length === 4);
+
+  const prose = parseAscii("This is an ordinary explanatory note.\nIt continues as prose on the next line.");
+  assert.equal(prose.regions.length, 2);
+  assert.ok(prose.analysis.rejected.some(item => item.recognizer === "multiline-region" && item.reason === "low-confidence"));
+
+  const barrier = parseAscii("alpha\n-----\nbeta");
+  assert.deepEqual(barrier.regions.map(region => region.label), ["alpha", "beta"]);
+  assert.equal(barrier.analysis.accepted.some(item => item.recognizer === "multiline-region"), false);
 });
 
 const recoverWith = (input, runner) => {
@@ -121,6 +138,7 @@ test("deterministic random inputs never escape parser invariants", () => {
     const input = lines.join(random() < 0.5 ? "\n" : "\r\n");
     const parsed = parseAscii(input, { semanticProfile: random() < 0.5 ? "none" : "llm-common" });
     assert.deepEqual(validatePrimitiveDocument(parsed.primitives), [], `primitive invariant failure for fuzz case ${caseIndex}`);
+    assert.deepEqual(validateNodeRegions(parsed.regions, parsed.primitives), [], `node region invariant failure for fuzz case ${caseIndex}`);
     assert.deepEqual(validateDiagram(parsed.diagram, parsed.primitives), [], `Diagram invariant failure for fuzz case ${caseIndex}`);
     assert.doesNotThrow(() => JSON.stringify(parsed));
   }

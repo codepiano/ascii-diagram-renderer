@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyDiagram, parseAscii, validateDiagram, validatePrimitiveDocument } from "../dist/core.js";
+import { classifyDiagram, parseAscii, validateDiagram, validateNodeRegions, validatePrimitiveDocument } from "../dist/core.js";
 import { GlyphGraph } from "../dist/glyph-graph.js";
 import { resolveCandidates } from "../dist/recognition.js";
 import { recognizerRegistry } from "../dist/recognizer-registry.js";
@@ -62,7 +62,7 @@ test("semantic topology is stable under indentation and CRLF normalization", () 
 test("parse analysis explains accepted and conflicting topology candidates", () => {
   const input = "               Text\n                 │\n        ┌────────┴────────┐\n        ▼                 ▼\n      EVOKE             INVOKE\n        │                 │\n lexical/grammar       interpreter\n explicitly indexes   supplies frame\n a frame              for coherence\n        │                 │\n        └────────┬────────┘\n                 ▼\n           Envisionment";
   const parsed = parseAscii(input);
-  assert.ok(parsed.analysis.accepted.some(item => item.phase === "node" && item.recognizer === "multiline-node"));
+  assert.ok(parsed.analysis.accepted.some(item => item.phase === "node" && item.recognizer === "multiline-region"));
   assert.ok(parsed.analysis.accepted.some(item => item.phase === "edge" && item.recognizer === "arrow-branch"));
   assert.ok(parsed.analysis.rejected.some(item => item.recognizer === "arrow" && item.reason === "conflict" && item.conflictsWith));
   assert.deepEqual(parsed.analysis.unconsumedEvidence, []);
@@ -133,6 +133,7 @@ test("semantic profiles isolate domain conventions from structural parsing", () 
 test("public validators enforce primitive and Diagram invariants", () => {
   const parsed = parseAscii("A → B");
   assert.deepEqual(validatePrimitiveDocument(parsed.primitives), []);
+  assert.deepEqual(validateNodeRegions(parsed.regions, parsed.primitives), []);
   assert.deepEqual(validateDiagram(parsed.diagram, parsed.primitives), []);
 
   const invalidDiagram = structuredClone(parsed.diagram);
@@ -147,6 +148,10 @@ test("public validators enforce primitive and Diagram invariants", () => {
   const invalidPrimitives = structuredClone(parsed.primitives);
   invalidPrimitives.items.push(structuredClone(invalidPrimitives.items[0]));
   assert.ok(validatePrimitiveDocument(invalidPrimitives).some(issue => issue.code === "DUPLICATE_PRIMITIVE_ID"));
+
+  const invalidRegions = structuredClone(parsed.regions);
+  invalidRegions[0].runIds.push("missing-run");
+  assert.ok(validateNodeRegions(invalidRegions, parsed.primitives).some(issue => issue.code === "MISSING_TEXT_RUN"));
 });
 
 test("display columns account for CJK and emoji in Diagram layout", () => {

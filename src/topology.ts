@@ -3,14 +3,18 @@ import { createParseAnalysis } from "./parse-analysis.js";
 import { resolveCandidates, summarizeResolution } from "./recognition.js";
 import { defaultRecognizerRunner, type RecognizerRunner } from "./recognizer-registry.js";
 import type { TopologyContext } from "./topology-recognizers.js";
-import type { Diagram, DiagramEdge, DiagramNode, ParseAnalysis, ParseOptions, PrimitiveDocument } from "./types.js";
+import type { Diagram, DiagramEdge, DiagramNode, NodeRegion, ParseAnalysis, ParseOptions, PrimitiveDocument } from "./types.js";
 
 /** Resolves independent interpretations into the single public Diagram IR. */
-export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, source: { lines: string[]; width: number; height: number }, options: ParseOptions = {}, recognizers: RecognizerRunner = defaultRecognizerRunner): { diagram: Diagram; analysis: ParseAnalysis } {
+export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, source: { lines: string[]; width: number; height: number }, options: ParseOptions = {}, recognizers: RecognizerRunner = defaultRecognizerRunner): { diagram: Diagram; regions: NodeRegion[]; analysis: ParseAnalysis } {
   const semanticProfile = options.semanticProfile ?? "llm-common";
+  const nodeResolution = resolveCandidates(recognizers.runNodes({ primitives }, semanticProfile));
+  const regions = nodeResolution.accepted.map(candidate => candidate.value.region).sort((a, b) => a.bounds.top - b.bounds.top || a.bounds.left - b.bounds.left);
   const nodeOccurrences = new Map<string, number>();
-  let nodes: DiagramNode[] = [...primitives.texts, ...primitives.boxes].sort((a, b) => a.bounds.top - b.bounds.top || a.bounds.left - b.bounds.left).map(primitive => {
-    const label = primitive.kind === "box" ? primitive.label : primitive.text;
+  let nodes: DiagramNode[] = [...regions, ...primitives.boxes].sort((a, b) =>
+    a.bounds.top - b.bounds.top || a.bounds.left - b.bounds.left
+  ).map(primitive => {
+    const label = primitive.label;
     const shape = primitive.kind === "box" ? "box" : "text";
     const fingerprint = `${shape}\u001f${label}`;
     const occurrence = (nodeOccurrences.get(fingerprint) ?? 0) + 1;
@@ -19,15 +23,9 @@ export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, sourc
       id: createStableId("node", [shape, label], occurrence),
       label,
       shape,
-      sourceBounds: primitive.bounds
+      sourceBounds: primitive.bounds,
+      ...(primitive.kind === "text" ? { metadata: { regionId: primitive.id, runIds: primitive.runIds } } : {})
     };
-  });
-  const nodeResolution = resolveCandidates(recognizers.runNodes(nodes, primitives, semanticProfile));
-  const removedNodes = new Set(nodeResolution.accepted.flatMap(candidate => candidate.value.merge.members.filter(id => id !== candidate.value.merge.primary)));
-  const nodeReplacements = new Map(nodeResolution.accepted.map(candidate => [candidate.value.merge.primary, candidate.value.merge]));
-  nodes = nodes.filter(node => !removedNodes.has(node.id)).map(node => {
-    const replacement = nodeReplacements.get(node.id);
-    return replacement ? { ...node, label: replacement.label, sourceBounds: replacement.sourceBounds } : node;
   });
 
   const context: TopologyContext = { nodes, primitives, source };
@@ -98,5 +96,5 @@ export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, sourc
     rejected,
     diagnostics
   });
-  return { diagram, analysis };
+  return { diagram, regions, analysis };
 }

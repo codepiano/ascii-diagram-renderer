@@ -9,9 +9,7 @@ export type TopologyContext = {
 
 type ProposedEdge = Omit<DiagramEdge, "id" | "provenance">;
 export type GroupInterpretation = Omit<DiagramGroup, "id" | "provenance">;
-export type NodeMerge = { primary: string; members: string[]; label: string; sourceBounds: Bounds };
 export type EdgeInterpretation = { edges: ProposedEdge[]; excludeNodes?: string[] };
-export type NodeInterpretation = { merge: NodeMerge };
 type EdgeCandidate = RecognitionCandidate<EdgeInterpretation>;
 
 const center = (bounds: Bounds): Point => ({
@@ -63,48 +61,6 @@ const diagramEdge = (
   markerEnd: edge.arrow ? "arrow" : "none",
   ...(edge.label ? { label: edge.label } : {})
 });
-
-export function recognizeMultilineNodes(nodes: DiagramNode[], primitives: PrimitiveDocument): Array<RecognitionCandidate<NodeInterpretation>> {
-  const verticalCells = primitives.connectors.flatMap(connector => connector.cells.filter(cell => cell.ports.includes("north") && cell.ports.includes("south")).map(cell => ({ connector, point: cell.point })));
-  const candidates: Array<RecognitionCandidate<NodeInterpretation>> = [];
-  for (const parent of nodes) {
-    if (parent.shape !== "text") continue;
-    const parentCenter = center(parent.sourceBounds);
-    const outgoing = verticalCells.filter(cell => cell.point.row === parent.sourceBounds.bottom + 1).sort((a, b) => Math.abs(a.point.col - parentCenter.col) - Math.abs(b.point.col - parentCenter.col))[0];
-    if (!outgoing) continue;
-    const axis = outgoing.point.col;
-    const startRow = parent.sourceBounds.bottom + 2;
-    const closing = verticalCells.map(cell => cell.point).filter(point => point.col === axis && point.row >= startRow).sort((a, b) => a.row - b.row)[0];
-    if (!closing || closing.row === startRow) continue;
-    const descriptions = nodes.filter(candidate => candidate.id !== parent.id && candidate.shape === "text" && candidate.sourceBounds.top >= startRow && candidate.sourceBounds.bottom < closing.row).filter(candidate => {
-      const candidateCenter = center(candidate.sourceBounds);
-      return nodes.filter(other => other.id !== parent.id && other.sourceBounds.top === parent.sourceBounds.top).every(other => Math.abs(candidateCenter.col - axis) <= Math.abs(candidateCenter.col - center(other.sourceBounds).col));
-    }).sort((a, b) => a.sourceBounds.top - b.sourceBounds.top || a.sourceBounds.left - b.sourceBounds.left);
-    if (descriptions.length < 2) continue;
-    const [body] = descriptions;
-    const evidence = [outgoing.connector.id, ...descriptions.map(description => `node:${description.id}`)];
-    candidates.push({
-      id: `multiline:${body.id}`,
-      recognizer: "multiline-node",
-      priority: 70,
-      confidence: 0.86,
-      consumes: descriptions.map(description => `node-interpretation:${description.id}`),
-      evidence,
-      value: { merge: {
-        primary: body.id,
-        members: descriptions.map(description => description.id),
-        label: descriptions.map(description => description.label).join("\n"),
-        sourceBounds: {
-        top: body.sourceBounds.top,
-        left: Math.min(...descriptions.map(description => description.sourceBounds.left)),
-        bottom: Math.max(...descriptions.map(description => description.sourceBounds.bottom)),
-        right: Math.max(...descriptions.map(description => description.sourceBounds.right))
-        }
-      } }
-    });
-  }
-  return candidates;
-}
 
 export function recognizeCycles(context: TopologyContext): EdgeCandidate[] {
   const { nodes, primitives } = context;

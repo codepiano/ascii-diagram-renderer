@@ -1,7 +1,7 @@
 import type { GlyphGraph } from "./glyph-graph.js";
 import type { CharacterGrid } from "./grid.js";
 import { createStableId } from "./identity.js";
-import type { Point, PrimitiveArrow, PrimitiveBox, PrimitiveConnector, PrimitiveDocument, PrimitiveText } from "./types.js";
+import type { Point, PrimitiveArrow, PrimitiveBox, PrimitiveConnector, PrimitiveDocument, TextRun } from "./types.js";
 
 const vertical = new Set(["|", "│", "║", "┃"]);
 const horizontal = new Set(["-", "─", "═", "━"]);
@@ -17,7 +17,7 @@ const connectorCharacters = new Set([
 
 /** Extracts the complete serializable source-fact boundary from a character grid. */
 export function extractPrimitives(grid: CharacterGrid, glyphs: GlyphGraph): PrimitiveDocument {
-  const texts: PrimitiveText[] = [];
+  const textRuns: TextRun[] = [];
   const boxes: PrimitiveBox[] = [];
   const primitiveArrows: PrimitiveArrow[] = [];
   const occupiedByBox = new Set<string>();
@@ -44,7 +44,7 @@ export function extractPrimitives(grid: CharacterGrid, glyphs: GlyphGraph): Prim
     candidates.sort((a, b) => b.columns.length - a.columns.length || a.distance - b.distance);
     return candidates[0]?.columns ?? [];
   };
-  const addText = (text: string, row: number, left: number) => texts.push({
+  const addText = (text: string, row: number, left: number) => textRuns.push({
     id: createStableId("text", [text, row, left]),
     kind: "text",
     text,
@@ -136,10 +136,10 @@ export function extractPrimitives(grid: CharacterGrid, glyphs: GlyphGraph): Prim
     junctions: component.junctions,
     paths: glyphs.paths(component).map(path => ({ id: path.id, points: path.points, closed: path.closed }))
   }));
-  const items = [...texts, ...boxes, ...primitiveArrows, ...connectors].sort((a, b) => {
+  const items = [...textRuns, ...boxes, ...primitiveArrows, ...connectors].sort((a, b) => {
     const pointA = a.kind === "arrow" ? a.point : { row: a.bounds.top, col: a.bounds.left };
     const pointB = b.kind === "arrow" ? b.point : { row: b.bounds.top, col: b.bounds.left };
     return pointA.row - pointB.row || pointA.col - pointB.col || a.kind.localeCompare(b.kind);
   });
-  return { version: "1", items, texts, boxes, arrows: primitiveArrows, connectors };
+  return { version: "1", items, textRuns, boxes, arrows: primitiveArrows, connectors };
 }
