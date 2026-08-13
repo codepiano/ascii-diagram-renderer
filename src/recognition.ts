@@ -3,6 +3,7 @@ export type RecognitionCandidate<T> = {
   recognizer: string;
   priority: number;
   confidence: number;
+  minimumConfidence?: number;
   consumes: string[];
   evidence: string[];
   value: T;
@@ -22,7 +23,7 @@ export function resolveCandidates<T>(candidates: RecognitionCandidate<T>[], opti
     b.priority - a.priority || b.confidence - a.confidence || a.id.localeCompare(b.id)
   );
   for (const candidate of ordered) {
-    if (candidate.confidence < (options.minimumConfidence ?? 0)) {
+    if (candidate.confidence < (candidate.minimumConfidence ?? options.minimumConfidence ?? 0)) {
       rejected.push({ candidate, reason: "low-confidence" });
       continue;
     }

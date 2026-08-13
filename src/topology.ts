@@ -1,22 +1,13 @@
 import { createStableId } from "./identity.js";
 import { createParseAnalysis } from "./parse-analysis.js";
 import { resolveCandidates, summarizeResolution } from "./recognition.js";
-import {
-  recognizeArrows,
-  recognizeArrowBranches,
-  recognizeCycles,
-  recognizeExampleGroups,
-  recognizeLineBranches,
-  recognizeLineEdges,
-  recognizeMultilineNodes,
-  type TopologyContext
-} from "./topology-recognizers.js";
+import { runEdgeRecognizers, runGroupRecognizers, runNodeRecognizers } from "./recognizer-registry.js";
+import type { TopologyContext } from "./topology-recognizers.js";
 import type { Diagram, DiagramEdge, DiagramNode, ParseAnalysis, ParseOptions, PrimitiveDocument } from "./types.js";
-
-const edgeRecognizers = [recognizeArrowBranches, recognizeArrows, recognizeLineBranches, recognizeLineEdges];
 
 /** Resolves independent interpretations into the single public Diagram IR. */
 export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, source: { lines: string[]; width: number; height: number }, options: ParseOptions = {}): { diagram: Diagram; analysis: ParseAnalysis } {
+  const semanticProfile = options.semanticProfile ?? "llm-common";
   const nodeOccurrences = new Map<string, number>();
   let nodes: DiagramNode[] = [...primitives.texts, ...primitives.boxes].sort((a, b) => a.bounds.top - b.bounds.top || a.bounds.left - b.bounds.left).map(primitive => {
     const label = primitive.kind === "box" ? primitive.label : primitive.text;
@@ -31,7 +22,7 @@ export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, sourc
       sourceBounds: primitive.bounds
     };
   });
-  const nodeResolution = resolveCandidates(recognizeMultilineNodes(nodes, primitives), { minimumConfidence: 0.6 });
+  const nodeResolution = resolveCandidates(runNodeRecognizers(nodes, primitives, semanticProfile));
   const removedNodes = new Set(nodeResolution.accepted.flatMap(candidate => candidate.value.merge.members.filter(id => id !== candidate.value.merge.primary)));
   const nodeReplacements = new Map(nodeResolution.accepted.map(candidate => [candidate.value.merge.primary, candidate.value.merge]));
   nodes = nodes.filter(node => !removedNodes.has(node.id)).map(node => {
@@ -40,11 +31,7 @@ export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, sourc
   });
 
   const context: TopologyContext = { nodes, primitives, source };
-  const cycleCandidates = recognizeCycles(context);
-  const edgeResolution = resolveCandidates([
-    ...cycleCandidates,
-    ...edgeRecognizers.flatMap(recognize => recognize(context))
-  ], { minimumConfidence: 0.6 });
+  const edgeResolution = resolveCandidates(runEdgeRecognizers(context, semanticProfile));
   const excludedNodes = new Set(edgeResolution.accepted.flatMap(candidate => candidate.value.excludeNodes ?? []));
   nodes = nodes.filter(node => !excludedNodes.has(node.id));
 
@@ -65,8 +52,7 @@ export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, sourc
   }
 
   const groupContext: TopologyContext = { nodes, primitives, source };
-  const groupCandidates = (options.semanticProfile ?? "llm-common") === "llm-common" ? recognizeExampleGroups(groupContext) : [];
-  const groupResolution = resolveCandidates(groupCandidates, { minimumConfidence: 0.6 });
+  const groupResolution = resolveCandidates(runGroupRecognizers(groupContext, semanticProfile));
   const groupOccurrences = new Map<string, number>();
   const groups = groupResolution.accepted.map(candidate => {
     const parts = [candidate.recognizer, candidate.value.parent ?? "", ...candidate.value.members];

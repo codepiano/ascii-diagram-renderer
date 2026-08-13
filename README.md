@@ -138,6 +138,17 @@ const svg = asciiToSvg(flow, {
 
 `primitives` 是带独立版本号的可序列化源事实文档，包含 text、box、arrow 和 connector component；connector 具有 cells、端点、junction 和 paths，供诊断和后续 recognizer 使用。
 
+解析器会在返回前检查 primitive 与 Diagram 的结构不变量。调用方在读取缓存或处理外部 IR 时，也可以显式使用校验器：
+
+```ts
+import { validateDiagram, validatePrimitiveDocument } from "ascii-diagram-renderer/core";
+
+const primitiveIssues = validatePrimitiveDocument(primitives);
+const diagramIssues = validateDiagram(diagram, primitives);
+```
+
+校验覆盖版本、ID 唯一性、source dimensions、引用完整性、polyline geometry、provenance 和 edge evidence 可追溯性；返回值是带 `code`、`path` 和 `message` 的问题数组。
+
 `analysis` 用来解释解析过程，而不改变 Diagram：
 
 ```ts
@@ -165,12 +176,12 @@ const svg = asciiToSvg(flow, {
 
 1. `SourceDocument` 统一换行、Unicode 字符坐标和文本切片。
 2. `GlyphGraph` 将 `│`、`─`、`┼` 等字符表示为带 north/east/south/west 端口的二维连接图，并生成 connector components、端点、junction 和可追踪路径。
-3. tokenizer 在包内部识别字符级事实；primitive extraction 将文本、盒子、箭头和 GlyphGraph 连接组件统一为可序列化的 `PrimitiveDocument`。
-4. cycle、branch、arrow、line、group recognizer 只消费 primitive 与节点上下文，分别提交带置信度、证据和资源占用的候选解释。
-5. resolver 按明确优先级和证据冲突选择解释；recognizer 的注册顺序不决定结果。
-6. resolver 的结果直接形成唯一 `Diagram`，分类器只读取同一次裁决产生的 `ParseAnalysis`，SVG renderer 直接消费 Diagram。
+3. primitive extraction 一次扫描文本、盒子和箭头，并将它们与 GlyphGraph 连接组件统一为可序列化的 `PrimitiveDocument`；不存在另一套 token 中间模型。
+4. recognizer registry 声明每个 recognizer 的 phase、structural/semantic profile 和最低置信度，topology 只按 phase 调度。
+5. recognizer 只消费 primitive 与节点上下文，提交带置信度、证据和资源占用的候选解释；resolver 按明确优先级和证据冲突选择解释，注册顺序不决定结果。
+6. resolver 的结果直接形成唯一 `Diagram`，validator 检查结构不变量，分类器读取同一次裁决产生的 `ParseAnalysis`，SVG renderer 直接消费 Diagram。
 
-新增内置语法时，应优先增加独立 recognizer 和 fixture，而不是在 topology orchestration 中加入依赖执行顺序的条件。纯领域约定应放入显式 semantic profile，而不是混入结构 recognizer。source、glyph 和 tokenizer 保持为包内实现细节；公共扩展边界是 `PrimitiveDocument`、`ParseAnalysis` 与 `Diagram`。
+新增内置语法时，应增加独立 recognizer、registry declaration 和 fixture，而不是修改 topology orchestration。纯领域约定应放入显式 semantic profile，而不是混入结构 recognizer。source 与 glyph 保持为包内实现细节；公共数据边界是 `PrimitiveDocument`、`ParseAnalysis` 与 `Diagram`。
 
 ### `renderSvg(diagram, options?)`
 

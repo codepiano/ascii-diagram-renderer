@@ -29,7 +29,7 @@ Decision`,
 const input = document.querySelector("#ascii-input");
 const preview = document.querySelector("#preview");
 const irOutput = document.querySelector("#ir-output");
-const tokenOutput = document.querySelector("#token-output");
+const primitiveOutput = document.querySelector("#primitive-output");
 const status = document.querySelector("#status");
 const mode = document.querySelector("#mode-select");
 const example = document.querySelector("#example-select");
@@ -45,14 +45,14 @@ function render() {
     if (shouldRender) preview.innerHTML = latestSvg;
     else preview.textContent = `未渲染：${parsed.classification.reasons.join("；")}`;
     irOutput.textContent = JSON.stringify({ classification: parsed.classification, analysis: parsed.analysis, diagram: parsed.diagram }, null, 2);
-    tokenOutput.replaceChildren(...parsed.primitives.items.map(primitive => {
+    primitiveOutput.replaceChildren(...parsed.primitives.items.map(primitive => {
       const item = document.createElement("span");
-      item.className = `token token-${primitive.kind}`;
+      item.className = `primitive primitive-${primitive.kind}`;
       item.textContent = primitive.kind === "text" ? `text: ${primitive.text}` : primitive.kind;
       return item;
     }));
     document.querySelector("#node-count").textContent = `${parsed.diagram.nodes.length} nodes · ${parsed.diagram.edges.length} edges`;
-    document.querySelector("#token-count").textContent = `${parsed.primitives.items.length} primitives`;
+    document.querySelector("#primitive-count").textContent = `${parsed.primitives.items.length} primitives`;
     status.textContent = shouldRender
       ? (parsed.diagram.diagnostics.length ? parsed.diagram.diagnostics.map(d => d.message).join(" ") : `解析成功 · ${parsed.classification.kind}`)
       : `未识别为 Diagram · ${parsed.classification.reasons.join("；")}`;

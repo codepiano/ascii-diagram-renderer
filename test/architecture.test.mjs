@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyDiagram, parseAscii } from "../dist/core.js";
+import { classifyDiagram, parseAscii, validateDiagram, validatePrimitiveDocument } from "../dist/core.js";
 import { GlyphGraph } from "../dist/glyph-graph.js";
 import { resolveCandidates } from "../dist/recognition.js";
+import { recognizerRegistry } from "../dist/recognizer-registry.js";
 import { displayWidth, SourceDocument } from "../dist/source.js";
 import { renderSvg } from "../dist/svg.js";
 
@@ -32,6 +33,19 @@ test("candidate resolution does not depend on recognizer registration order", ()
   const strong = { id: "strong", recognizer: "strong", priority: 20, confidence: 0.8, consumes: ["glyph:1"], evidence: ["glyph:1"], value: "strong" };
   assert.deepEqual(resolveCandidates([weak, strong]).accepted.map(candidate => candidate.id), ["strong"]);
   assert.deepEqual(resolveCandidates([strong, weak]).accepted.map(candidate => candidate.id), ["strong"]);
+});
+
+test("recognizer registry declares unique phase, profile, and confidence policy", () => {
+  assert.equal(new Set(recognizerRegistry.map(definition => definition.id)).size, recognizerRegistry.length);
+  assert.ok(recognizerRegistry.every(definition => ["node", "edge", "group"].includes(definition.phase)));
+  assert.ok(recognizerRegistry.every(definition => ["structural", "llm-common"].includes(definition.profile)));
+  assert.ok(recognizerRegistry.every(definition => definition.minimumConfidence >= 0 && definition.minimumConfidence <= 1));
+
+  const resolution = resolveCandidates([{
+    id: "below-own-threshold", recognizer: "test", priority: 1, confidence: 0.5,
+    minimumConfidence: 0.6, consumes: [], evidence: [], value: null
+  }], { minimumConfidence: 0 });
+  assert.equal(resolution.rejected[0]?.reason, "low-confidence");
 });
 
 test("semantic topology is stable under indentation and CRLF normalization", () => {
@@ -113,6 +127,25 @@ test("semantic profiles isolate domain conventions from structural parsing", () 
   assert.ok(structural.diagram.edges.length > 0);
   assert.equal(structural.analysis.accepted.some(item => item.recognizer === "examples"), false);
   assert.equal(structural.analysis.rejected.some(item => item.recognizer === "examples"), false);
+});
+
+test("public validators enforce primitive and Diagram invariants", () => {
+  const parsed = parseAscii("A → B");
+  assert.deepEqual(validatePrimitiveDocument(parsed.primitives), []);
+  assert.deepEqual(validateDiagram(parsed.diagram, parsed.primitives), []);
+
+  const invalidDiagram = structuredClone(parsed.diagram);
+  invalidDiagram.edges[0].target = "missing-node";
+  invalidDiagram.edges[0].geometry.points = [invalidDiagram.edges[0].geometry.points[0]];
+  invalidDiagram.nodes[1].id = invalidDiagram.nodes[0].id;
+  assert.deepEqual(
+    new Set(validateDiagram(invalidDiagram, parsed.primitives).map(issue => issue.code)),
+    new Set(["DUPLICATE_DIAGRAM_ID", "MISSING_EDGE_TARGET", "INVALID_EDGE_GEOMETRY"])
+  );
+
+  const invalidPrimitives = structuredClone(parsed.primitives);
+  invalidPrimitives.items.push(structuredClone(invalidPrimitives.items[0]));
+  assert.ok(validatePrimitiveDocument(invalidPrimitives).some(issue => issue.code === "DUPLICATE_PRIMITIVE_ID"));
 });
 
 test("display columns account for CJK and emoji in Diagram layout", () => {

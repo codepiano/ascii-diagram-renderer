@@ -8,7 +8,7 @@ export type TopologyContext = {
 };
 
 type ProposedEdge = Omit<DiagramEdge, "id" | "provenance">;
-type ProposedGroup = Omit<DiagramGroup, "id" | "provenance">;
+export type GroupInterpretation = Omit<DiagramGroup, "id" | "provenance">;
 export type NodeMerge = { primary: string; members: string[]; label: string; sourceBounds: Bounds };
 export type EdgeInterpretation = { edges: ProposedEdge[]; excludeNodes?: string[] };
 export type NodeInterpretation = { merge: NodeMerge };
@@ -241,9 +241,9 @@ export function recognizeLineBranches(context: TopologyContext): EdgeCandidate[]
   return candidates;
 }
 
-export function recognizeExampleGroups(context: TopologyContext): Array<RecognitionCandidate<ProposedGroup>> {
+export function recognizeExampleGroups(context: TopologyContext): Array<RecognitionCandidate<GroupInterpretation>> {
   const { nodes, primitives, source } = context;
-  const candidates: Array<RecognitionCandidate<ProposedGroup>> = [];
+  const candidates: Array<RecognitionCandidate<GroupInterpretation>> = [];
   for (let index = 0; index < nodes.length - 2; index++) {
     const parent = nodes[index], first = nodes[index + 1];
     const gap = source.lines.slice(parent.sourceBounds.bottom + 1, first.sourceBounds.top);

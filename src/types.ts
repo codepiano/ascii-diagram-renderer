@@ -5,6 +5,7 @@ export type Severity = "info" | "warning" | "error";
 export type Diagnostic = { code: string; message: string; severity: Severity; source?: Bounds };
 export type DiagramKind = "diagram" | "maybe" | "text";
 export type DiagramClassification = { kind: DiagramKind; confidence: number; reasons: string[] };
+export type ValidationIssue = { code: string; path: string; message: string };
 export type SemanticProfile = "none" | "llm-common";
 export type ParseOptions = { detection?: "strict" | "lenient"; semanticProfile?: SemanticProfile };
 export type RecognitionPhase = "node" | "edge" | "group";
