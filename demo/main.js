@@ -44,7 +44,7 @@ function render() {
     preview.replaceChildren();
     if (shouldRender) preview.innerHTML = latestSvg;
     else preview.textContent = `未渲染：${parsed.classification.reasons.join("；")}`;
-    irOutput.textContent = JSON.stringify({ classification: parsed.classification, diagram: parsed.diagram }, null, 2);
+    irOutput.textContent = JSON.stringify({ classification: parsed.classification, analysis: parsed.analysis, diagram: parsed.diagram }, null, 2);
     tokenOutput.replaceChildren(...parsed.tokens.map(token => {
       const item = document.createElement("span");
       item.className = `token token-${token.kind}`;

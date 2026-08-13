@@ -6,6 +6,37 @@ export type Diagnostic = { code: string; message: string; severity: Severity; so
 export type DiagramKind = "diagram" | "maybe" | "text";
 export type DiagramClassification = { kind: DiagramKind; confidence: number; reasons: string[] };
 export type ParseOptions = { detection?: "strict" | "lenient" };
+export type RecognitionPhase = "node" | "edge" | "group";
+export type RecognitionSummary = {
+  id: string;
+  phase: RecognitionPhase;
+  recognizer: string;
+  confidence: number;
+  evidence: string[];
+  consumes: string[];
+};
+export type RejectedRecognitionSummary = RecognitionSummary & {
+  reason: "conflict" | "low-confidence";
+  conflictsWith?: string;
+};
+export type ParseAnalysis = {
+  accepted: RecognitionSummary[];
+  rejected: RejectedRecognitionSummary[];
+  unconsumedEvidence: string[];
+  metrics: {
+    nodeCount: number;
+    edgeCount: number;
+    groupCount: number;
+    arrowCount: number;
+    unresolvedArrowCount: number;
+    boxCount: number;
+    connectorComponentCount: number;
+    verticalConnectorCellCount: number;
+    likelyMarkdownList: boolean;
+    maxEdgeConfidence: number;
+  };
+  diagnostics: Diagnostic[];
+};
 
 export type Token =
   | { kind: "text"; text: string; bounds: Bounds }
