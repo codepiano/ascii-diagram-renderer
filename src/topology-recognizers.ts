@@ -17,6 +17,7 @@ const center = (bounds: Bounds): Point => ({
   col: Math.round((bounds.left + bounds.right) / 2)
 });
 const distance = (a: Point, b: Point) => Math.abs(a.row - b.row) + Math.abs(a.col - b.col);
+const nearestColumn = (columns: number[], point: Point) => [...columns].sort((a, b) => Math.abs(a - point.col) - Math.abs(b - point.col) || a - b)[0];
 const componentForPoints = (connectors: PrimitiveConnector[], points: Point[]) => {
   const matches = connectors.map(component => ({
     component,
@@ -107,16 +108,18 @@ export function recognizeArrowBranches(context: TopologyContext): EdgeCandidate[
     const above = (col: number) => nodes.filter(node => node.sourceBounds.bottom < row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => b.sourceBounds.bottom - a.sourceBounds.bottom)[0];
     const below = (col: number) => nodes.filter(node => node.sourceBounds.top > row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => a.sourceBounds.top - b.sourceBounds.top)[0];
     const targetColumns = downArrows.length ? downArrows.map(arrow => arrow.point.col) : verticalBelow;
-    const parents = sourceColumns.map(above).filter(Boolean) as DiagramNode[];
+    const parents = sourceColumns.map(col => ({ col, node: above(col) })).filter((parent): parent is { col: number; node: DiagramNode } => Boolean(parent.node));
     const targets = targetColumns.map(below).filter(Boolean) as DiagramNode[];
     if (!parents.length || !targets.length || !downArrows.length) continue;
-    const pairs = parents.length === 1 || targets.length === 1 ? parents.flatMap(parent => targets.map(target => [parent, target] as const)) : parents.map((parent, index) => [parent, targets[index]] as const).filter((pair): pair is readonly [DiagramNode, DiagramNode] => Boolean(pair[1]));
+    const pairs = parents.length === 1 || targets.length === 1
+      ? parents.flatMap(parent => targets.map(target => [parent, target] as const))
+      : parents.map((parent, index) => [parent, targets[index]] as const).filter((pair): pair is readonly [{ col: number; node: DiagramNode }, DiagramNode] => Boolean(pair[1]));
     const trunk = componentForPoints(primitives.connectors, horizontal.points);
     const evidence = [...(trunk ? [trunk.id] : [connector.id]), ...downArrows.map(arrow => arrow.id), ...downArrows.flatMap(arrow => adjacentComponents(primitives.connectors, arrow.point).map(component => component.id))];
     const edges = pairs.map(([parent, target]) => {
-      const col = targetColumns[targets.indexOf(target)] ?? sourceColumns[parents.indexOf(parent)];
-      const sourceCenter = center(parent.sourceBounds), targetCenter = center(target.sourceBounds);
-      return diagramEdge({ source: parent.id, target: target.id, direction: "down", points: [sourceCenter, { row, col: sourceCenter.col }, { row, col }, { row, col: targetCenter.col }, targetCenter], arrow: true });
+      const col = targetColumns[targets.indexOf(target)] ?? parent.col;
+      const sourceCenter = center(parent.node.sourceBounds), targetCenter = center(target.sourceBounds);
+      return diagramEdge({ source: parent.node.id, target: target.id, direction: "down", points: [sourceCenter, { row, col: parent.col }, { row, col }, { row, col }, targetCenter], arrow: true });
     });
     candidates.push({ id: `arrow-branch:${row}:${left}`, recognizer: "arrow-branch", priority: 80, confidence: 0.96, consumes: evidence, evidence, value: { edges } });
   }
@@ -180,17 +183,19 @@ export function recognizeLineBranches(context: TopologyContext): EdgeCandidate[]
     const { row } = horizontal;
     if (arrows.some(arrow => arrow.direction === "down" && arrow.point.row === row + 1)) continue;
     const { left, right } = horizontal;
-    const columns = [...new Set(connector.cells.filter(cell => cell.point.row === row && (cell.ports.includes("north") || cell.ports.includes("south"))).map(cell => cell.point.col))].filter(col => col >= left && col <= right);
+    const sourceColumns = [...new Set(connector.cells.filter(cell => cell.point.row === row && cell.ports.includes("north")).map(cell => cell.point.col))].filter(col => col >= left && col <= right);
+    const branchColumns = [...new Set(connector.cells.filter(cell => cell.point.row === row && cell.ports.includes("south")).map(cell => cell.point.col))].filter(col => col >= left && col <= right);
     const above = (col: number) => nodes.filter(node => node.sourceBounds.bottom < row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => b.sourceBounds.bottom - a.sourceBounds.bottom)[0];
     const below = (col: number) => nodes.filter(node => node.sourceBounds.top > row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => a.sourceBounds.top - b.sourceBounds.top)[0];
-    const parent = columns.map(above).find(Boolean);
-    const branches = columns.map(col => ({ col, target: below(col) })).filter(branch => branch.target);
+    const parent = sourceColumns.map(above).find(Boolean) ?? branchColumns.map(above).find(Boolean);
+    const branches = branchColumns.map(col => ({ col, target: below(col) })).filter(branch => branch.target);
     if (!parent || !branches.length) continue;
+    const sourceAxis = nearestColumn(sourceColumns, center(parent.sourceBounds)) ?? center(parent.sourceBounds).col;
     const trunk = componentForPoints(primitives.connectors, horizontal.points);
     const evidence = [trunk?.id ?? connector.id];
     const edges = branches.map(branch => {
       const sourceCenter = center(parent.sourceBounds), targetCenter = center(branch.target!.sourceBounds);
-      return diagramEdge({ source: parent.id, target: branch.target!.id, direction: "down", points: [sourceCenter, { row, col: sourceCenter.col }, { row, col: branch.col }, { row, col: targetCenter.col }, targetCenter], arrow: false });
+      return diagramEdge({ source: parent.id, target: branch.target!.id, direction: "down", points: [sourceCenter, { row, col: sourceAxis }, { row, col: branch.col }, { row, col: branch.col }, targetCenter], arrow: false });
     });
     candidates.push({ id: `line-branch:${row}:${left}`, recognizer: "line-branch", priority: 50, confidence: 0.9, consumes: evidence, evidence, value: { edges } });
   }

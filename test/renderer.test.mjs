@@ -92,6 +92,23 @@ test("branch routes preserve the horizontal trunk", () => {
   assert.equal(rootCenter, String(expectedX));
 });
 
+test("preserve mode uses connector axes for uneven tree labels", () => {
+  const input = "Agent System\n\n                       |\n        --------------------------------\n        |              |               |\n\n    Context        State          Communication\n\n        |              |               |\n\n    MCP            Workflow          A2A";
+  const { diagram } = parseAscii(input);
+  const branch = diagram.edges.filter(edge => edge.provenance.recognizer === "line-branch");
+  assert.deepEqual(branch.map(edge => edge.geometry.points[1].col), [23, 23, 23]);
+  assert.deepEqual(branch.map(edge => edge.geometry.points.at(-2).col), [8, 23, 39]);
+
+  const svg = asciiToSvg(input, { mode: "preserve" });
+  const paths = [...svg.matchAll(/<path class="edge" d="([^"]+)"/g)].map(match => match[1]);
+  assert.match(paths[0], /^M 235\.5 58 L 235\.5 122 L 100\.5 122 L 100\.5 192$/);
+  assert.deepEqual(paths.slice(-3), [
+    "M 100.5 226 L 100.5 304",
+    "M 235.5 226 L 235.5 304",
+    "M 379.5 226 L 379.5 304"
+  ]);
+});
+
 test("cycle rails stay orthogonal when labels widen their nodes", () => {
   const input = "              COMMERCIAL EVENT\n\n          ┌──────── Goods ────────┐\n          │                       ↓\n       Seller                   Buyer\n          ↑                       │\n          └──────── Money ────────┘";
   const svg = asciiToSvg(input, { mode: "preserve" });

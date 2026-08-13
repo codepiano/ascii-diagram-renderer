@@ -3,6 +3,7 @@ import type { Diagram, DiagramEdge, EdgePort, RenderOptions } from "./types.js";
 
 type Position = { x: number; y: number; w: number; h: number };
 type PixelPoint = { x: number; y: number };
+type AxisConstraint = { value: number; weight: number };
 const esc = (value: string) => value.replace(/[&<>\"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[character]!));
 const center = (position: Position): PixelPoint => ({ x: position.x + position.w / 2, y: position.y + position.h / 2 });
 const portPoint = (position: Position, port: EdgePort): PixelPoint => {
@@ -39,20 +40,33 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
     y: point.row * cellHeight + padding + cellHeight / 2
   });
   if (options.mode !== "reflow") {
-    const anchors = new Map<string, { x?: number; y?: number }>();
+    const anchors = new Map<string, { x: AxisConstraint[]; y: AxisConstraint[] }>();
     const applyAnchor = (id: string, port: EdgePort, adjacent: { row: number; col: number }) => {
-      const value = port === "top" || port === "bottom" ? { x: pixel(adjacent).x } : { y: pixel(adjacent).y };
-      anchors.set(id, { ...value, ...anchors.get(id) });
+      const anchor = anchors.get(id) ?? { x: [], y: [] };
+      const constraint = { value: port === "top" || port === "bottom" ? pixel(adjacent).x : pixel(adjacent).y, weight: 1 };
+      (port === "top" || port === "bottom" ? anchor.x : anchor.y).push(constraint);
+      anchors.set(id, anchor);
     };
     for (const edge of diagram.edges) {
       if (edge.geometry.points.length < 2) continue;
       applyAnchor(edge.source, edge.geometry.sourcePort, edge.geometry.points[1]);
       applyAnchor(edge.target, edge.geometry.targetPort, edge.geometry.points.at(-2)!);
     }
+    const weightedMedian = (constraints: AxisConstraint[]) => {
+      const sorted = [...constraints].sort((a, b) => a.value - b.value);
+      const midpoint = sorted.reduce((sum, constraint) => sum + constraint.weight, 0) / 2;
+      let weight = 0;
+      for (const constraint of sorted) {
+        weight += constraint.weight;
+        if (weight >= midpoint) return constraint.value;
+      }
+      return sorted.at(-1)?.value;
+    };
     for (const [id, anchor] of anchors) {
       const position = positions.get(id)!;
-      if (anchor.x !== undefined) position.x = anchor.x - position.w / 2;
-      if (anchor.y !== undefined) position.y = anchor.y - position.h / 2;
+      const x = weightedMedian(anchor.x), y = weightedMedian(anchor.y);
+      if (x !== undefined) position.x = x - position.w / 2;
+      if (y !== undefined) position.y = y - position.h / 2;
     }
   }
   for (const group of diagram.groups.filter(group => group.kind === "examples")) {
