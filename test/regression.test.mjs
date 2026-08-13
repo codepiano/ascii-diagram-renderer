@@ -13,9 +13,11 @@ for (const file of files) {
   const fixture = JSON.parse(readFileSync(join(caseDir, file), "utf8"));
   test(`regression: ${fixture.name}`, () => {
     const parsed = parseAscii(fixture.input);
+    const lenient = parseAscii(fixture.input, { detection: "lenient" });
     const diagram = parsed.diagram;
     const expect = fixture.expect ?? {};
     if (expect.classification) assert.equal(parsed.classification.kind, expect.classification);
+    if (expect.lenientClassification) assert.equal(lenient.classification.kind, expect.lenientClassification);
     assert.deepEqual(diagram.nodes.map(node => node.label), expect.nodeLabels ?? diagram.nodes.map(node => node.label));
     assert.deepEqual(diagram.nodes.map(node => node.shape), expect.nodeShapes ?? diagram.nodes.map(node => node.shape));
     const labels = new Map(diagram.nodes.map(node => [node.id, node.label]));
@@ -30,6 +32,18 @@ for (const file of files) {
     if (expect.svg) {
       const svg = renderSvg(diagram, fixture.options);
       for (const fragment of expect.svg) assert.ok(svg.includes(fragment), `${file}: SVG does not contain ${fragment}`);
+    }
+
+    const nodeIds = new Set(diagram.nodes.map(node => node.id));
+    assert.equal(nodeIds.size, diagram.nodes.length, `${file}: node ids must be unique`);
+    for (const edge of diagram.edges) {
+      assert.ok(nodeIds.has(edge.source), `${file}: missing edge source ${edge.source}`);
+      assert.ok(nodeIds.has(edge.target), `${file}: missing edge target ${edge.target}`);
+      assert.ok(edge.sourcePath.length >= 2, `${file}: edge paths need at least two points`);
+    }
+    for (const group of diagram.groups) {
+      if (group.parent) assert.ok(nodeIds.has(group.parent), `${file}: missing group parent ${group.parent}`);
+      for (const member of group.members) assert.ok(nodeIds.has(member), `${file}: missing group member ${member}`);
     }
   });
 }

@@ -1,0 +1,10 @@
+{
+  "name": "astral unicode does not corrupt source columns",
+  "input": "😀 A → B",
+  "expect": {
+    "classification": "diagram",
+    "nodeLabels": ["😀 A", "B"],
+    "edges": [["😀 A", "B"]],
+    "diagnostics": 0
+  }
+}

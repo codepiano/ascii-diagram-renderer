@@ -1,0 +1,11 @@
+{
+  "name": "horizontal separator is not a recovered connection",
+  "input": "A\n---\nB",
+  "expect": {
+    "classification": "text",
+    "lenientClassification": "maybe",
+    "nodeLabels": ["A", "B"],
+    "edges": [],
+    "diagnostics": 0
+  }
+}

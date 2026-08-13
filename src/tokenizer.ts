@@ -1,4 +1,5 @@
 import { CharacterGrid } from "./grid.js";
+import { GlyphGraph } from "./glyph-graph.js";
 import type { Bounds, Point, Token } from "./types.js";
 
 const vertical = new Set(["|", "│", "║", "┃"]);
@@ -12,7 +13,7 @@ const horizontalJunctions = new Set(["┌", "┐", "└", "┘", "├", "┤", "
 const verticalJunctions = new Set(["┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼"]);
 const connectors = new Set([...vertical, ...horizontal, ...boxChars, ...Object.keys(arrows)]);
 
-export function tokenize(grid: CharacterGrid): Token[] {
+export function tokenize(grid: CharacterGrid, glyphs = new GlyphGraph(grid)): Token[] {
   const tokens: Token[] = [];
   const used = new Set<string>();
   const at = (row: number, col: number) => grid.char({ row, col });
@@ -34,13 +35,12 @@ export function tokenize(grid: CharacterGrid): Token[] {
     if (ch !== "v" && ch !== "^") return Boolean(arrows[ch]);
     return grid.isBlank({ row, col: col - 1 }) && grid.isBlank({ row, col: col + 1 });
   };
-  const isConnectorAt = (row: number, col: number) => connectors.has(at(row, col)) && (vertical.has(at(row, col)) || horizontal.has(at(row, col)) || boxChars.has(at(row, col)) || isArrowAt(row, col));
+  const isConnectorAt = (row: number, col: number) => glyphs.isConnector({ row, col }) || (connectors.has(at(row, col)) && isArrowAt(row, col));
 
   // Box detection comes first so its borders are not mistaken for free edges.
   for (let r = 0; r < grid.height; r++) for (let c = 0; c < grid.width; c++) {
     if (!boxChars.has(at(r, c)) || used.has(key({ row: r, col: c }))) continue;
     const right = [...Array(grid.width - c - 1)].map((_, i) => at(r, c + i + 1));
-    const end = right.findIndex(ch => boxChars.has(ch) && at(r, c + right.findIndex(x => boxChars.has(x)) + 1) === ch);
     const closeCol = right.findIndex(ch => ["+", "┐", "╮"].includes(ch));
     if (closeCol < 1 || !right.slice(0, closeCol).every(ch => horizontal.has(ch))) continue;
     const bottom = [...Array(grid.height - r - 1)].map((_, i) => at(r + i + 1, c));
@@ -48,7 +48,7 @@ export function tokenize(grid: CharacterGrid): Token[] {
     if (closeRow < 1 || !bottom.slice(0, closeRow).every(ch => vertical.has(ch))) continue;
     const br = { row: r + closeRow + 1, col: c + closeCol + 1 };
     if (!["+", "┘", "╯"].includes(at(br.row, br.col))) continue;
-    const label = grid.lines.slice(r + 1, br.row).map(line => line.slice(c + 1, br.col).trim()).filter(Boolean).join(" ");
+    const label = [...Array(br.row - r - 1)].map((_, index) => grid.slice(r + index + 1, c + 1, br.col).trim()).filter(Boolean).join(" ");
     const bounds = { top: r, left: c, bottom: br.row, right: br.col };
     tokens.push({ kind: "box", bounds, label });
     for (let rr = r; rr <= br.row; rr++) for (let cc = c; cc <= br.col; cc++) used.add(`${rr}:${cc}`);
@@ -70,10 +70,11 @@ export function tokenize(grid: CharacterGrid): Token[] {
       if (!isConnectorAt(r, c) && !grid.isBlank({ row: r, col: c })) {
         const start = c;
         while (c < grid.width && !isConnectorAt(r, c)) c++;
-        const raw = grid.lines[r].slice(start, c).replace(/\s+$/, "");
+        const raw = grid.slice(r, start, c).replace(/\s+$/, "");
         const anchors = nearbyColumnAnchors(r, start, c);
         const splitAtGap = (midpoint: number) => {
-          const gaps = [...grid.lines[r].matchAll(/ {2,}/g)].map(match => ({ start: match.index!, end: match.index! + match[0].length }));
+          const line = grid.rows[r].join("");
+          const gaps = [...line.matchAll(/ {2,}/g)].map(match => ({ start: match.index!, end: match.index! + match[0].length }));
           const nearest = gaps.filter(gap => gap.start > start && gap.end < c).sort((a, b) => Math.abs((a.start + a.end) / 2 - midpoint) - Math.abs((b.start + b.end) / 2 - midpoint))[0];
           return nearest ? Math.round((nearest.start + nearest.end) / 2) : Math.floor(midpoint);
         };
@@ -83,8 +84,9 @@ export function tokenize(grid: CharacterGrid): Token[] {
         if (segments) {
           for (let index = 0; index < segments.length - 1; index++) {
             const segmentStart = segments[index], segmentEnd = segments[index + 1];
-            const text = grid.lines[r].slice(segmentStart, segmentEnd).trim();
-            const first = grid.lines[r].slice(segmentStart, segmentEnd).search(/\S/);
+            const segment = grid.slice(r, segmentStart, segmentEnd);
+            const text = segment.trim();
+            const first = segment.search(/\S/);
             if (text && first >= 0) tokens.push({ kind: "text", text, bounds: { top: r, left: segmentStart + first, bottom: r, right: segmentStart + first + [...text].length - 1 } });
           }
         } else {

@@ -11,6 +11,8 @@
 - `expect.edges`：按标签表示的 `[source, target]`
 - `expect.tokenKinds`：Tokenizer 输出类型顺序
 - `expect.diagnostics`：诊断数量
+- `expect.classification`：严格模式分类
+- `expect.lenientClassification`：宽松模式分类
 - `expect.svg`：SVG 必须包含的稳定片段
 
-新增案例后直接运行 `npm test`，无需修改测试运行器。
+每个 fixture 还会自动检查节点 ID 唯一性，以及 edge/group 对节点的引用完整性。新增案例后直接运行 `npm test`，无需修改测试运行器；如果演示页面也需要展示该案例，再将文件名加入 `index.json`。

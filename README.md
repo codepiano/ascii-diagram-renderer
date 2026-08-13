@@ -6,7 +6,7 @@
 
 ## 能做什么
 
-- 保留字符网格中的原始行列坐标，识别文本、盒节点、连线、箭头和交叉点
+- 使用统一 Unicode 坐标保留原始行列位置，识别文本、盒节点、连线、箭头和交叉点
 - 从显式连接符恢复节点、边、方向和分支关系
 - 将结果输出为结构化的 `Diagram IR`，便于调试、存储或二次处理
 - 提供保留原始位置的 `preserve` 布局，以及简单重排的 `reflow` 布局
@@ -110,15 +110,15 @@ const svg = asciiToSvg(flow, {
 | 导入 | 用途 |
 | --- | --- |
 | `ascii-diagram-renderer` | `parseAscii`、类型、`renderSvg` 和严格的 `asciiToSvg` |
-| `ascii-diagram-renderer/core` | 仅解析能力：`CharacterGrid`、`tokenize`、`recoverTopology`、`classifyDiagram`、`parseAscii` 与类型 |
+| `ascii-diagram-renderer/core` | 无 DOM 的解析能力：稳定入口 `parseAscii`，以及为兼容保留的 token、topology 和 classification API |
 | `ascii-diagram-renderer/svg` | SVG 渲染能力：`renderSvg`、`renderLayoutedSvg` |
 
 ### `parseAscii(input, options?)`
 
 返回 `{ grid, tokens, diagram, classification }`。`options.detection` 可为：
 
-- `"strict"`：保守判断，适合自动渲染（`asciiToSvg` 固定使用该模式）。
-- `"lenient"`：宽松判断，适合需要提示用户或人工确认的交互流程。
+- `"strict"`：要求恢复出节点关系或发现强结构证据，适合自动渲染（`asciiToSvg` 固定使用该模式）。
+- `"lenient"`：未恢复出关系但存在多个节点和图形符号时返回 `maybe`，适合人工确认流程。
 
 `diagram` 的主要结构为：
 
@@ -132,6 +132,21 @@ const svg = asciiToSvg(flow, {
   source: { lines, width, height },
 }
 ```
+
+`Diagram v1` 是稳定兼容边界。内部解析器先生成带通用折线 geometry 和识别证据的 canonical IR，再通过适配器生成上述结构；因此新增识别规则不需要把规则名称扩散到公共 IR。
+
+### 解析架构
+
+解析核心按不同抽象层组织：
+
+1. `SourceDocument` 统一换行、Unicode 字符坐标和文本切片。
+2. `GlyphGraph` 将 `│`、`─`、`┼` 等字符表示为带 north/east/south/west 端口的二维连接图。
+3. tokenizer 提取文本、盒子、线和箭头等源事实。
+4. cycle、branch、arrow、line、group recognizer 分别提交带置信度、证据和资源占用的候选解释。
+5. resolver 按明确优先级和证据冲突选择解释；recognizer 的注册顺序不决定结果。
+6. canonical IR 经过 Diagram v1 adapter 后交给分类器和 renderer。
+
+新增内置语法时，应优先增加独立 recognizer 和 fixture，而不是在 `recoverTopology` 中加入依赖执行顺序的条件。新的 source、glyph、candidate 和 canonical 类型保持为包内实现细节；`CharacterGrid`、`tokenize`、`recoverTopology` 和 `classifyDiagram` 仅为既有兼容与诊断用途继续导出。常规集成应以 `parseAscii` 为稳定入口。
 
 ### `renderSvg(diagram, options?)`
 

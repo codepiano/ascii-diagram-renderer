@@ -13,5 +13,8 @@
   "12-single-space-columns.json",
   "13-rectangular-cycle.json",
   "14-unicode-junction-tree.json",
-  "15-multiline-tree-labels.json"
+  "15-multiline-tree-labels.json",
+  "16-disconnected-separator.json",
+  "17-astral-label.json",
+  "18-prose-after-diagram.json"
 ]

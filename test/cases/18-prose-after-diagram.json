@@ -1,0 +1,11 @@
+{
+  "name": "prose after a diagram is not invented as an examples group",
+  "input": "A\n|\nB\n\nThis is an ordinary explanatory note.\nIt continues as prose on the next line.",
+  "expect": {
+    "classification": "diagram",
+    "nodeLabels": ["A", "B", "This is an ordinary explanatory note.", "It continues as prose on the next line."],
+    "edges": [["A", "B"]],
+    "groups": [],
+    "diagnostics": 0
+  }
+}
