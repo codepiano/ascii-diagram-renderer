@@ -9,7 +9,6 @@
 - `expect.nodeLabels`：节点标签顺序
 - `expect.nodeShapes`：节点形状顺序
 - `expect.edges`：按标签表示的 `[source, target]`
-- `expect.tokenKinds`：Tokenizer 输出类型顺序
 - `expect.diagnostics`：诊断数量
 - `expect.classification`：严格模式分类
 - `expect.lenientClassification`：宽松模式分类

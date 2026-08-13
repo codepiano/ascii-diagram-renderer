@@ -4,7 +4,6 @@
   "expect": {
     "nodeLabels": ["World State", "Observation", "Decision"],
     "edges": [["World State", "Observation"], ["Observation", "Decision"]],
-    "tokenKinds": ["text", "line", "arrow", "text", "line", "arrow", "text"],
     "diagnostics": 0,
     "svg": ["<svg", "marker-end"]
   }

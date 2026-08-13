@@ -45,14 +45,14 @@ function render() {
     if (shouldRender) preview.innerHTML = latestSvg;
     else preview.textContent = `未渲染：${parsed.classification.reasons.join("；")}`;
     irOutput.textContent = JSON.stringify({ classification: parsed.classification, analysis: parsed.analysis, diagram: parsed.diagram }, null, 2);
-    tokenOutput.replaceChildren(...parsed.tokens.map(token => {
+    tokenOutput.replaceChildren(...parsed.primitives.items.map(primitive => {
       const item = document.createElement("span");
-      item.className = `token token-${token.kind}`;
-      item.textContent = token.kind === "text" ? `text: ${token.text}` : token.kind;
+      item.className = `token token-${primitive.kind}`;
+      item.textContent = primitive.kind === "text" ? `text: ${primitive.text}` : primitive.kind;
       return item;
     }));
     document.querySelector("#node-count").textContent = `${parsed.diagram.nodes.length} nodes · ${parsed.diagram.edges.length} edges`;
-    document.querySelector("#token-count").textContent = `${parsed.tokens.length} tokens`;
+    document.querySelector("#token-count").textContent = `${parsed.primitives.items.length} primitives`;
     status.textContent = shouldRender
       ? (parsed.diagram.diagnostics.length ? parsed.diagram.diagnostics.map(d => d.message).join(" ") : `解析成功 · ${parsed.classification.kind}`)
       : `未识别为 Diagram · ${parsed.classification.reasons.join("；")}`;
@@ -92,13 +92,10 @@ function semanticChecks(fixture, diagram, classification) {
   if (expected.nodeShapes) checks.push(["节点形状", JSON.stringify(nodeShapes) === JSON.stringify(expected.nodeShapes), nodeShapes.join(", ")]);
   if (expected.edges) checks.push(["有向边", JSON.stringify(edges) === JSON.stringify(expected.edges), `${edges.length} edges`]);
   if (expected.groups) checks.push(["语义分组", JSON.stringify(groups) === JSON.stringify(expected.groups), `${groups.length} groups`]);
-  if (expected.tokenKinds) checks.push(["Token 类型", JSON.stringify(parsedTokens(selectedCase.input)) === JSON.stringify(expected.tokenKinds), `${selectedCase.input.length} chars`]);
   if (expected.diagnostics !== undefined) checks.push(["诊断数量", diagram.diagnostics.length === expected.diagnostics, `${diagram.diagnostics.length} diagnostics`]);
   if (expected.classification) checks.push(["Diagram 分类", classification.kind === expected.classification, `${classification.kind} · ${classification.confidence}`]);
   return checks;
 }
-
-function parsedTokens(inputText) { return parseAscii(inputText).tokens.map(token => token.kind); }
 
 function showCase(fixture) {
   selectedCase = fixture;

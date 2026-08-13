@@ -5,6 +5,6 @@
   "expect": {
     "nodeLabels": ["World State", "Observation", "Decision"],
     "edges": [["World State", "Observation"], ["Observation", "Decision"]],
-    "svg": ["M 64.5 142 L 64.5 167 L 64.5 167 L 64.5 192"]
+    "svg": ["M 64.5 142 L 64.5 192"]
   }
 }

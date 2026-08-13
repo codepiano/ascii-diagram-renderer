@@ -1,17 +1,14 @@
-import type { CanonicalEdge, CanonicalGroup } from "./canonical.js";
-import type { GlyphComponent, GlyphGraph } from "./glyph-graph.js";
 import type { RecognitionCandidate } from "./recognition.js";
-import type { Bounds, DiagramNode, EdgePort, Point, Token } from "./types.js";
+import type { Bounds, DiagramEdge, DiagramGroup, DiagramNode, EdgePort, Point, PrimitiveConnector, PrimitiveDocument } from "./types.js";
 
 export type TopologyContext = {
   nodes: DiagramNode[];
-  tokens: Token[];
+  primitives: PrimitiveDocument;
   source: { lines: string[]; width: number; height: number };
-  glyphs: GlyphGraph;
 };
 
-type ProposedEdge = Omit<CanonicalEdge, "id" | "provenance">;
-type ProposedGroup = Omit<CanonicalGroup, "id" | "provenance">;
+type ProposedEdge = Omit<DiagramEdge, "id" | "provenance">;
+type ProposedGroup = Omit<DiagramGroup, "id" | "provenance">;
 export type NodeMerge = { primary: string; members: string[]; label: string; sourceBounds: Bounds };
 export type EdgeInterpretation = { edges: ProposedEdge[]; excludeNodes?: string[] };
 export type NodeInterpretation = { merge: NodeMerge };
@@ -22,18 +19,36 @@ const center = (bounds: Bounds): Point => ({
   col: Math.round((bounds.left + bounds.right) / 2)
 });
 const distance = (a: Point, b: Point) => Math.abs(a.row - b.row) + Math.abs(a.col - b.col);
-const evidenceKey = (tokens: Token[], token: Token) => `token:${tokens.indexOf(token)}`;
-const componentKey = (component: GlyphComponent) => component.id;
-const componentForPoints = (glyphs: GlyphGraph, points: Point[]) => {
-  const matches = glyphs.components().map(component => ({
+const componentForPoints = (connectors: PrimitiveConnector[], points: Point[]) => {
+  const matches = connectors.map(component => ({
     component,
     overlap: points.filter(point => component.cells.some(cell => cell.point.row === point.row && cell.point.col === point.col)).length
   })).sort((a, b) => b.overlap - a.overlap);
   return matches[0]?.overlap ? matches[0].component : undefined;
 };
-const adjacentComponents = (glyphs: GlyphGraph, point: Point) => glyphs.components().filter(component => component.cells.some(cell => distance(cell.point, point) === 1));
+const adjacentComponents = (connectors: PrimitiveConnector[], point: Point) => connectors.filter(component => component.cells.some(cell => distance(cell.point, point) === 1));
+const horizontalRuns = (connector: PrimitiveConnector) => {
+  const byRow = new Map<number, number[]>();
+  for (const cell of connector.cells.filter(cell => cell.ports.includes("east") || cell.ports.includes("west"))) {
+    byRow.set(cell.point.row, [...(byRow.get(cell.point.row) ?? []), cell.point.col]);
+  }
+  return [...byRow].flatMap(([row, columns]) => {
+    const sorted = [...new Set(columns)].sort((a, b) => a - b);
+    const runs: Array<{ row: number; left: number; right: number; points: Point[] }> = [];
+    let current: number[] = [];
+    for (const column of sorted) {
+      if (current.length && column > current.at(-1)! + 1) {
+        if (current.length >= 2) runs.push({ row, left: current[0], right: current.at(-1)!, points: current.map(col => ({ row, col })) });
+        current = [];
+      }
+      current.push(column);
+    }
+    if (current.length >= 2) runs.push({ row, left: current[0], right: current.at(-1)!, points: current.map(col => ({ row, col })) });
+    return runs;
+  });
+};
 
-const canonicalEdge = (
+const diagramEdge = (
   edge: Omit<ProposedEdge, "geometry" | "markerEnd"> & { points: Point[]; arrow: boolean; sourcePort?: EdgePort; targetPort?: EdgePort }
 ): ProposedEdge => ({
   source: edge.source,
@@ -49,17 +64,17 @@ const canonicalEdge = (
   ...(edge.label ? { label: edge.label } : {})
 });
 
-export function recognizeMultilineNodes(nodes: DiagramNode[], tokens: Token[]): Array<RecognitionCandidate<NodeInterpretation>> {
-  const verticals = tokens.filter((token): token is Extract<Token, { kind: "line" }> => token.kind === "line" && token.orientation === "vertical");
+export function recognizeMultilineNodes(nodes: DiagramNode[], primitives: PrimitiveDocument): Array<RecognitionCandidate<NodeInterpretation>> {
+  const verticalCells = primitives.connectors.flatMap(connector => connector.cells.filter(cell => cell.ports.includes("north") && cell.ports.includes("south")).map(cell => ({ connector, point: cell.point })));
   const candidates: Array<RecognitionCandidate<NodeInterpretation>> = [];
   for (const parent of nodes) {
     if (parent.shape !== "text") continue;
     const parentCenter = center(parent.sourceBounds);
-    const outgoing = verticals.filter(line => line.points.some(point => point.row === parent.sourceBounds.bottom + 1)).sort((a, b) => Math.abs(a.points[0].col - parentCenter.col) - Math.abs(b.points[0].col - parentCenter.col))[0];
+    const outgoing = verticalCells.filter(cell => cell.point.row === parent.sourceBounds.bottom + 1).sort((a, b) => Math.abs(a.point.col - parentCenter.col) - Math.abs(b.point.col - parentCenter.col))[0];
     if (!outgoing) continue;
-    const axis = outgoing.points[0].col;
+    const axis = outgoing.point.col;
     const startRow = parent.sourceBounds.bottom + 2;
-    const closing = verticals.flatMap(line => line.points.filter(point => point.col === axis && point.row >= startRow)).sort((a, b) => a.row - b.row)[0];
+    const closing = verticalCells.map(cell => cell.point).filter(point => point.col === axis && point.row >= startRow).sort((a, b) => a.row - b.row)[0];
     if (!closing || closing.row === startRow) continue;
     const descriptions = nodes.filter(candidate => candidate.id !== parent.id && candidate.shape === "text" && candidate.sourceBounds.top >= startRow && candidate.sourceBounds.bottom < closing.row).filter(candidate => {
       const candidateCenter = center(candidate.sourceBounds);
@@ -67,7 +82,7 @@ export function recognizeMultilineNodes(nodes: DiagramNode[], tokens: Token[]): 
     }).sort((a, b) => a.sourceBounds.top - b.sourceBounds.top || a.sourceBounds.left - b.sourceBounds.left);
     if (descriptions.length < 2) continue;
     const [body] = descriptions;
-    const evidence = [evidenceKey(tokens, outgoing), ...descriptions.map(description => `node:${description.id}`)];
+    const evidence = [outgoing.connector.id, ...descriptions.map(description => `node:${description.id}`)];
     candidates.push({
       id: `multiline:${body.id}`,
       recognizer: "multiline-node",
@@ -92,8 +107,8 @@ export function recognizeMultilineNodes(nodes: DiagramNode[], tokens: Token[]): 
 }
 
 export function recognizeCycles(context: TopologyContext): EdgeCandidate[] {
-  const { nodes, tokens, glyphs } = context;
-  const arrows = tokens.filter((token): token is Extract<Token, { kind: "arrow" }> => token.kind === "arrow");
+  const { nodes, primitives } = context;
+  const arrows = primitives.arrows;
   const candidates: EdgeCandidate[] = [];
   for (const leftArrow of arrows.filter(arrow => arrow.direction === "up")) for (const rightArrow of arrows.filter(arrow => arrow.direction === "down")) {
     if (leftArrow.point.col >= rightArrow.point.col) continue;
@@ -107,16 +122,16 @@ export function recognizeCycles(context: TopologyContext): EdgeCandidate[] {
     }).sort((a, b) => side === "top" ? b.sourceBounds.top - a.sourceBounds.top : a.sourceBounds.top - b.sourceBounds.top)[0];
     const topLabel = railLabel("top"), bottomLabel = railLabel("bottom");
     if (!leftNode || !rightNode || !topLabel || !bottomLabel) continue;
-    const railComponents = glyphs.components().filter(component => component.bounds.left >= leftArrow.point.col && component.bounds.right <= rightArrow.point.col && component.bounds.top >= topLabel.sourceBounds.top && component.bounds.bottom <= bottomLabel.sourceBounds.bottom);
-    const evidence = [evidenceKey(tokens, leftArrow), evidenceKey(tokens, rightArrow), ...railComponents.map(componentKey), `node:${topLabel.id}`, `node:${bottomLabel.id}`];
+    const railComponents = primitives.connectors.filter(component => component.bounds.left >= leftArrow.point.col && component.bounds.right <= rightArrow.point.col && component.bounds.top >= topLabel.sourceBounds.top && component.bounds.bottom <= bottomLabel.sourceBounds.bottom);
+    const evidence = [leftArrow.id, rightArrow.id, ...railComponents.map(component => component.id), `node:${topLabel.id}`, `node:${bottomLabel.id}`];
     candidates.push({
       id: `cycle:${leftArrow.point.row}:${leftArrow.point.col}:${rightArrow.point.col}`,
       recognizer: "cycle", priority: 100, confidence: 0.98, consumes: evidence, evidence,
       value: {
         excludeNodes: [topLabel.id, bottomLabel.id],
         edges: [
-          canonicalEdge({ source: leftNode.id, target: rightNode.id, direction: "right", points: [center(leftNode.sourceBounds), { row: topLabel.sourceBounds.top, col: leftArrow.point.col }, { row: topLabel.sourceBounds.top, col: rightArrow.point.col }, center(rightNode.sourceBounds)], sourcePort: "top", targetPort: "top", arrow: true, label: { text: topLabel.label, point: center(topLabel.sourceBounds) } }),
-          canonicalEdge({ source: rightNode.id, target: leftNode.id, direction: "left", points: [center(rightNode.sourceBounds), { row: bottomLabel.sourceBounds.bottom, col: rightArrow.point.col }, { row: bottomLabel.sourceBounds.bottom, col: leftArrow.point.col }, center(leftNode.sourceBounds)], sourcePort: "bottom", targetPort: "bottom", arrow: true, label: { text: bottomLabel.label, point: center(bottomLabel.sourceBounds) } })
+          diagramEdge({ source: leftNode.id, target: rightNode.id, direction: "right", points: [center(leftNode.sourceBounds), { row: topLabel.sourceBounds.top, col: leftArrow.point.col }, { row: topLabel.sourceBounds.top, col: rightArrow.point.col }, center(rightNode.sourceBounds)], sourcePort: "top", targetPort: "top", arrow: true, label: { text: topLabel.label, point: center(topLabel.sourceBounds) } }),
+          diagramEdge({ source: rightNode.id, target: leftNode.id, direction: "left", points: [center(rightNode.sourceBounds), { row: bottomLabel.sourceBounds.bottom, col: rightArrow.point.col }, { row: bottomLabel.sourceBounds.bottom, col: leftArrow.point.col }, center(leftNode.sourceBounds)], sourcePort: "bottom", targetPort: "bottom", arrow: true, label: { text: bottomLabel.label, point: center(bottomLabel.sourceBounds) } })
         ]
       }
     });
@@ -125,16 +140,14 @@ export function recognizeCycles(context: TopologyContext): EdgeCandidate[] {
 }
 
 export function recognizeArrowBranches(context: TopologyContext): EdgeCandidate[] {
-  const { nodes, tokens, glyphs } = context;
-  const arrows = tokens.filter((token): token is Extract<Token, { kind: "arrow" }> => token.kind === "arrow");
-  const lines = tokens.filter((token): token is Extract<Token, { kind: "line" }> => token.kind === "line");
+  const { nodes, primitives } = context;
+  const arrows = primitives.arrows;
   const candidates: EdgeCandidate[] = [];
-  for (const horizontal of lines.filter(line => line.orientation === "horizontal")) {
-    const row = horizontal.points[0].row, left = horizontal.points[0].col, right = horizontal.points.at(-1)!.col;
-    const graphColumns = horizontal.points.filter(point => glyphs.cell(point)?.ports.has("north")).map(point => point.col);
-    const sourceColumns = [...new Set([...graphColumns, ...lines.filter(line => line.orientation === "vertical").flatMap(line => line.points.filter(point => point.row === row - 1).map(point => point.col))])].filter(col => col >= left && col <= right);
+  for (const connector of primitives.connectors) for (const horizontal of horizontalRuns(connector)) {
+    const { row, left, right } = horizontal;
+    const sourceColumns = [...new Set(connector.cells.filter(cell => cell.point.row === row && cell.ports.includes("north")).map(cell => cell.point.col))].filter(col => col >= left && col <= right);
     const downArrows = arrows.filter(arrow => arrow.direction === "down" && arrow.point.row === row + 1 && arrow.point.col >= left && arrow.point.col <= right);
-    const verticalBelow = [...new Set(lines.filter(line => line.orientation === "vertical").flatMap(line => line.points.filter(point => point.row === row + 1).map(point => point.col)))].filter(col => col >= left && col <= right);
+    const verticalBelow = [...new Set(connector.cells.filter(cell => cell.point.row === row && cell.ports.includes("south")).map(cell => cell.point.col))].filter(col => col >= left && col <= right);
     const above = (col: number) => nodes.filter(node => node.sourceBounds.bottom < row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => b.sourceBounds.bottom - a.sourceBounds.bottom)[0];
     const below = (col: number) => nodes.filter(node => node.sourceBounds.top > row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => a.sourceBounds.top - b.sourceBounds.top)[0];
     const targetColumns = downArrows.length ? downArrows.map(arrow => arrow.point.col) : verticalBelow;
@@ -142,12 +155,12 @@ export function recognizeArrowBranches(context: TopologyContext): EdgeCandidate[
     const targets = targetColumns.map(below).filter(Boolean) as DiagramNode[];
     if (!parents.length || !targets.length || !downArrows.length) continue;
     const pairs = parents.length === 1 || targets.length === 1 ? parents.flatMap(parent => targets.map(target => [parent, target] as const)) : parents.map((parent, index) => [parent, targets[index]] as const).filter((pair): pair is readonly [DiagramNode, DiagramNode] => Boolean(pair[1]));
-    const trunk = componentForPoints(glyphs, horizontal.points);
-    const evidence = [...(trunk ? [componentKey(trunk)] : [evidenceKey(tokens, horizontal)]), ...downArrows.map(arrow => evidenceKey(tokens, arrow)), ...downArrows.flatMap(arrow => adjacentComponents(glyphs, arrow.point).map(componentKey))];
+    const trunk = componentForPoints(primitives.connectors, horizontal.points);
+    const evidence = [...(trunk ? [trunk.id] : [connector.id]), ...downArrows.map(arrow => arrow.id), ...downArrows.flatMap(arrow => adjacentComponents(primitives.connectors, arrow.point).map(component => component.id))];
     const edges = pairs.map(([parent, target]) => {
       const col = targetColumns[targets.indexOf(target)] ?? sourceColumns[parents.indexOf(parent)];
       const sourceCenter = center(parent.sourceBounds), targetCenter = center(target.sourceBounds);
-      return canonicalEdge({ source: parent.id, target: target.id, direction: "down", points: [sourceCenter, { row, col: sourceCenter.col }, { row, col }, { row, col: targetCenter.col }, targetCenter], arrow: true });
+      return diagramEdge({ source: parent.id, target: target.id, direction: "down", points: [sourceCenter, { row, col: sourceCenter.col }, { row, col }, { row, col: targetCenter.col }, targetCenter], arrow: true });
     });
     candidates.push({ id: `arrow-branch:${row}:${left}`, recognizer: "arrow-branch", priority: 80, confidence: 0.96, consumes: evidence, evidence, value: { edges } });
   }
@@ -155,8 +168,8 @@ export function recognizeArrowBranches(context: TopologyContext): EdgeCandidate[
 }
 
 export function recognizeArrows(context: TopologyContext): EdgeCandidate[] {
-  const { nodes, tokens, glyphs } = context;
-  const arrows = tokens.filter((token): token is Extract<Token, { kind: "arrow" }> => token.kind === "arrow");
+  const { nodes, primitives } = context;
+  const arrows = primitives.arrows;
   return arrows.flatMap(arrow => {
     const before = nodes.filter(node => center(node.sourceBounds).row < arrow.point.row || (center(node.sourceBounds).row === arrow.point.row && center(node.sourceBounds).col < arrow.point.col));
     const after = nodes.filter(node => center(node.sourceBounds).row > arrow.point.row || (center(node.sourceBounds).row === arrow.point.row && center(node.sourceBounds).col > arrow.point.col));
@@ -166,23 +179,21 @@ export function recognizeArrows(context: TopologyContext): EdgeCandidate[] {
     const source = arrow.direction === "up" || arrow.direction === "left" ? candidates[1] : candidates[0];
     const target = arrow.direction === "up" || arrow.direction === "left" ? candidates[0] : candidates[1];
     if (!source || !target || source.id === target.id) return [];
-    const evidence = [evidenceKey(tokens, arrow), ...adjacentComponents(glyphs, arrow.point).map(componentKey)];
+    const evidence = [arrow.id, ...adjacentComponents(primitives.connectors, arrow.point).map(component => component.id)];
     const sourceCenter = center(source.sourceBounds), targetCenter = center(target.sourceBounds);
     const points = [sourceCenter, arrow.point, arrow.point, targetCenter];
-    return [{ id: `arrow:${arrow.point.row}:${arrow.point.col}`, recognizer: "arrow", priority: 60, confidence: 0.9, consumes: evidence, evidence, value: { edges: [canonicalEdge({ source: source.id, target: target.id, direction: arrow.direction, points, arrow: true })] } }];
+    return [{ id: `arrow:${arrow.point.row}:${arrow.point.col}`, recognizer: "arrow", priority: 60, confidence: 0.9, consumes: evidence, evidence, value: { edges: [diagramEdge({ source: source.id, target: target.id, direction: arrow.direction, points, arrow: true })] } }];
   });
 }
 
 export function recognizeLineEdges(context: TopologyContext): EdgeCandidate[] {
-  const { nodes, tokens, glyphs } = context;
-  const boxes = tokens.filter((token): token is Extract<Token, { kind: "box" }> => token.kind === "box");
+  const { nodes, primitives } = context;
   const candidates: EdgeCandidate[] = [];
-  for (const component of glyphs.components()) {
+  for (const component of primitives.connectors) {
     if (component.junctions.length) continue;
-    if (boxes.some(box => component.cells.every(cell => cell.point.row >= box.bounds.top && cell.point.row <= box.bounds.bottom && cell.point.col >= box.bounds.left && cell.point.col <= box.bounds.right))) continue;
     const { bounds } = component;
     const first = component.cells[0];
-    const vertical = bounds.bottom > bounds.top || (bounds.bottom === bounds.top && bounds.right === bounds.left && first.ports.has("north"));
+    const vertical = bounds.bottom > bounds.top || (bounds.bottom === bounds.top && bounds.right === bounds.left && first.ports.includes("north"));
     const horizontal = bounds.right > bounds.left && bounds.bottom === bounds.top;
     if (!vertical && !horizontal) continue;
     let source: DiagramNode | undefined, target: DiagramNode | undefined;
@@ -195,41 +206,35 @@ export function recognizeLineEdges(context: TopologyContext): EdgeCandidate[] {
     }
     if (!source || !target) continue;
     const recognizer = vertical ? "vertical-line" : "horizontal-line";
-    const evidence = [componentKey(component)];
-    const path = glyphs.paths(component).sort((a, b) => b.points.length - a.points.length)[0];
+    const evidence = [component.id];
+    const path = [...component.paths].sort((a, b) => b.points.length - a.points.length)[0];
     const middle = path?.points[Math.floor(path.points.length / 2)] ?? component.cells[Math.floor(component.cells.length / 2)].point;
     const sourceCenter = center(source.sourceBounds), targetCenter = center(target.sourceBounds);
     const points = [sourceCenter, middle, middle, targetCenter];
-    candidates.push({ id: `${recognizer}:${bounds.top}:${bounds.left}`, recognizer, priority: 40, confidence: 0.82, consumes: evidence, evidence, value: { edges: [canonicalEdge({ source: source.id, target: target.id, direction: vertical ? "down" : "right", points, arrow: false })] } });
+    candidates.push({ id: `${recognizer}:${bounds.top}:${bounds.left}`, recognizer, priority: 40, confidence: 0.82, consumes: evidence, evidence, value: { edges: [diagramEdge({ source: source.id, target: target.id, direction: vertical ? "down" : "right", points, arrow: false })] } });
   }
   return candidates;
 }
 
 export function recognizeLineBranches(context: TopologyContext): EdgeCandidate[] {
-  const { nodes, tokens, glyphs } = context;
-  const arrows = tokens.filter((token): token is Extract<Token, { kind: "arrow" }> => token.kind === "arrow");
-  const lines = tokens.filter((token): token is Extract<Token, { kind: "line" }> => token.kind === "line");
+  const { nodes, primitives } = context;
+  const arrows = primitives.arrows;
   const candidates: EdgeCandidate[] = [];
-  for (const horizontal of lines.filter(line => line.orientation === "horizontal")) {
-    const row = horizontal.points[0].row;
+  for (const connector of primitives.connectors) for (const horizontal of horizontalRuns(connector)) {
+    const { row } = horizontal;
     if (arrows.some(arrow => arrow.direction === "down" && arrow.point.row === row + 1)) continue;
-    const left = horizontal.points[0].col, right = horizontal.points.at(-1)!.col;
-    const adjacentLines = lines.filter(line => line.orientation === "vertical" && line.points.some(point => point.row === row - 1 || point.row === row + 1));
-    const graphColumns = horizontal.points.filter(point => {
-      const ports = glyphs.cell(point)?.ports;
-      return ports?.has("north") || ports?.has("south");
-    }).map(point => point.col);
-    const columns = [...new Set([...graphColumns, ...adjacentLines.flatMap(line => line.points.map(point => point.col))])].filter(col => col >= left && col <= right);
+    const { left, right } = horizontal;
+    const columns = [...new Set(connector.cells.filter(cell => cell.point.row === row && (cell.ports.includes("north") || cell.ports.includes("south"))).map(cell => cell.point.col))].filter(col => col >= left && col <= right);
     const above = (col: number) => nodes.filter(node => node.sourceBounds.bottom < row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => b.sourceBounds.bottom - a.sourceBounds.bottom)[0];
     const below = (col: number) => nodes.filter(node => node.sourceBounds.top > row && node.sourceBounds.left <= col && node.sourceBounds.right >= col).sort((a, b) => a.sourceBounds.top - b.sourceBounds.top)[0];
     const parent = columns.map(above).find(Boolean);
     const branches = columns.map(col => ({ col, target: below(col) })).filter(branch => branch.target);
     if (!parent || !branches.length) continue;
-    const trunk = componentForPoints(glyphs, horizontal.points);
-    const evidence = trunk ? [componentKey(trunk)] : [evidenceKey(tokens, horizontal), ...adjacentLines.map(line => evidenceKey(tokens, line))];
+    const trunk = componentForPoints(primitives.connectors, horizontal.points);
+    const evidence = [trunk?.id ?? connector.id];
     const edges = branches.map(branch => {
       const sourceCenter = center(parent.sourceBounds), targetCenter = center(branch.target!.sourceBounds);
-      return canonicalEdge({ source: parent.id, target: branch.target!.id, direction: "down", points: [sourceCenter, { row, col: sourceCenter.col }, { row, col: branch.col }, { row, col: targetCenter.col }, targetCenter], arrow: false });
+      return diagramEdge({ source: parent.id, target: branch.target!.id, direction: "down", points: [sourceCenter, { row, col: sourceCenter.col }, { row, col: branch.col }, { row, col: targetCenter.col }, targetCenter], arrow: false });
     });
     candidates.push({ id: `line-branch:${row}:${left}`, recognizer: "line-branch", priority: 50, confidence: 0.9, consumes: evidence, evidence, value: { edges } });
   }
@@ -237,7 +242,7 @@ export function recognizeLineBranches(context: TopologyContext): EdgeCandidate[]
 }
 
 export function recognizeExampleGroups(context: TopologyContext): Array<RecognitionCandidate<ProposedGroup>> {
-  const { nodes, tokens, source } = context;
+  const { nodes, primitives, source } = context;
   const candidates: Array<RecognitionCandidate<ProposedGroup>> = [];
   for (let index = 0; index < nodes.length - 2; index++) {
     const parent = nodes[index], first = nodes[index + 1];
@@ -247,7 +252,7 @@ export function recognizeExampleGroups(context: TopologyContext): Array<Recognit
     for (let cursor = index + 2; cursor < nodes.length; cursor++) {
       const previous = nodes[cursor - 1], current = nodes[cursor];
       if (current.sourceBounds.top - previous.sourceBounds.bottom !== 1) break;
-      if (tokens.some(token => (token.kind === "line" && token.points.some(point => point.row === current.sourceBounds.top)) || (token.kind === "arrow" && token.point.row === current.sourceBounds.top))) break;
+      if (primitives.arrows.some(arrow => arrow.point.row === current.sourceBounds.top) || primitives.connectors.some(connector => connector.cells.some(cell => cell.point.row === current.sourceBounds.top))) break;
       members.push(current);
     }
     if (members.length < 2) continue;

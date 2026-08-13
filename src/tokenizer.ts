@@ -1,6 +1,13 @@
 import { CharacterGrid } from "./grid.js";
 import { GlyphGraph } from "./glyph-graph.js";
-import type { Bounds, Point, Token } from "./types.js";
+import type { Bounds, Point } from "./types.js";
+
+export type Token =
+  | { kind: "text"; text: string; bounds: Bounds }
+  | { kind: "line"; orientation: "horizontal" | "vertical"; points: Point[] }
+  | { kind: "junction"; point: Point }
+  | { kind: "arrow"; direction: "up" | "down" | "left" | "right"; point: Point }
+  | { kind: "box"; bounds: Bounds; label: string };
 
 const vertical = new Set(["|", "│", "║", "┃"]);
 const horizontal = new Set(["-", "─", "═", "━"]);

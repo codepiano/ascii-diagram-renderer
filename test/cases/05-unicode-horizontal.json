@@ -4,7 +4,6 @@
   "expect": {
     "nodeLabels": ["Input", "Output"],
     "edges": [["Input", "Output"]],
-    "tokenKinds": ["text", "arrow", "text"],
     "diagnostics": 0
   }
 }

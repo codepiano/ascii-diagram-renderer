@@ -1,9 +1,7 @@
-import type { GlyphGraph } from "./glyph-graph.js";
-import type { Diagnostic, ParseAnalysis, RecognitionSummary, RejectedRecognitionSummary, Token } from "./types.js";
+import type { Diagnostic, ParseAnalysis, PrimitiveDocument, RecognitionSummary, RejectedRecognitionSummary } from "./types.js";
 
 export function createParseAnalysis(input: {
-  tokens: Token[];
-  glyphs: GlyphGraph;
+  primitives: PrimitiveDocument;
   nodeCount: number;
   edgeCount: number;
   groupCount: number;
@@ -11,19 +9,14 @@ export function createParseAnalysis(input: {
   rejected: RejectedRecognitionSummary[];
   diagnostics: Diagnostic[];
 }): ParseAnalysis {
-  const { tokens, glyphs, accepted, rejected, diagnostics } = input;
-  const boxes = tokens.filter((token): token is Extract<Token, { kind: "box" }> => token.kind === "box");
-  const meaningfulComponents = glyphs.components().filter(component => !boxes.some(box => component.cells.every(cell =>
-    cell.point.row >= box.bounds.top && cell.point.row <= box.bounds.bottom && cell.point.col >= box.bounds.left && cell.point.col <= box.bounds.right
-  )));
+  const { primitives, accepted, rejected, diagnostics } = input;
   const evidenceUniverse = [
-    ...tokens.flatMap((token, index) => token.kind === "arrow" ? [`token:${index}`] : []),
-    ...meaningfulComponents.map(component => component.id)
+    ...primitives.arrows.map(arrow => arrow.id),
+    ...primitives.connectors.map(connector => connector.id)
   ];
   const consumed = new Set(accepted.flatMap(item => item.consumes));
   const unconsumedEvidence = evidenceUniverse.filter(key => !consumed.has(key));
-  const arrows = tokens.filter(token => token.kind === "arrow");
-  const lineTokens = tokens.filter((token): token is Extract<Token, { kind: "line" }> => token.kind === "line");
+  const arrows = primitives.arrows;
   return {
     accepted,
     rejected,
@@ -33,11 +26,18 @@ export function createParseAnalysis(input: {
       edgeCount: input.edgeCount,
       groupCount: input.groupCount,
       arrowCount: arrows.length,
-      unresolvedArrowCount: tokens.filter((token, index) => token.kind === "arrow" && unconsumedEvidence.includes(`token:${index}`)).length,
-      boxCount: boxes.length,
-      connectorComponentCount: meaningfulComponents.length,
-      verticalConnectorCellCount: meaningfulComponents.flatMap(component => component.cells).filter(cell => cell.ports.has("north") && cell.ports.has("south")).length,
-      likelyMarkdownList: arrows.length === 0 && lineTokens.length > 0 && lineTokens.every(token => token.orientation === "horizontal" && token.points.length === 1),
+      unresolvedArrowCount: arrows.filter(arrow => unconsumedEvidence.includes(arrow.id)).length,
+      boxCount: primitives.boxes.length,
+      connectorComponentCount: primitives.connectors.length,
+      verticalConnectorCellCount: primitives.connectors.flatMap(component => component.cells).filter(cell => cell.ports.includes("north") && cell.ports.includes("south")).length,
+      likelyMarkdownList: arrows.length === 0 && primitives.connectors.length > 0 && primitives.connectors.every(connector =>
+        connector.cells.length === 1 &&
+        connector.cells.every(cell =>
+          (cell.ports.includes("east") || cell.ports.includes("west")) &&
+          !cell.ports.includes("north") &&
+          !cell.ports.includes("south")
+        )
+      ),
       maxEdgeConfidence: Math.max(0, ...accepted.filter(item => item.phase === "edge").map(item => item.confidence))
     },
     diagnostics: [

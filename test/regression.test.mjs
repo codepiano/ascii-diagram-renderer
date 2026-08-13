@@ -23,11 +23,10 @@ for (const file of files) {
     const labels = new Map(diagram.nodes.map(node => [node.id, node.label]));
     const edges = diagram.edges.map(edge => [labels.get(edge.source), labels.get(edge.target)]);
     assert.deepEqual(edges, expect.edges ?? edges);
-    const edgeLabels = diagram.edges.map(edge => edge.label);
+    const edgeLabels = diagram.edges.map(edge => edge.label?.text);
     assert.deepEqual(edgeLabels, expect.edgeLabels ?? edgeLabels);
     const groups = diagram.groups.map(group => ({ kind: group.kind, parent: labels.get(group.parent), members: group.members.map(id => labels.get(id)) }));
     assert.deepEqual(groups, expect.groups ?? groups);
-    assert.deepEqual(parsed.tokens.map(token => token.kind), expect.tokenKinds ?? parsed.tokens.map(token => token.kind));
     assert.equal(diagram.diagnostics.length, expect.diagnostics ?? diagram.diagnostics.length);
     if (expect.svg) {
       const svg = renderSvg(diagram, fixture.options);
@@ -39,7 +38,7 @@ for (const file of files) {
     for (const edge of diagram.edges) {
       assert.ok(nodeIds.has(edge.source), `${file}: missing edge source ${edge.source}`);
       assert.ok(nodeIds.has(edge.target), `${file}: missing edge target ${edge.target}`);
-      assert.ok(edge.sourcePath.length >= 2, `${file}: edge paths need at least two points`);
+      assert.ok(edge.geometry.points.length >= 2, `${file}: edge paths need at least two points`);
     }
     for (const group of diagram.groups) {
       if (group.parent) assert.ok(nodeIds.has(group.parent), `${file}: missing group parent ${group.parent}`);

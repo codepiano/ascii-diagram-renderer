@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyDiagram, parseAscii, parseAsciiV2 } from "../dist/core.js";
+import { classifyDiagram, parseAscii } from "../dist/core.js";
 import { GlyphGraph } from "../dist/glyph-graph.js";
 import { resolveCandidates } from "../dist/recognition.js";
 import { displayWidth, SourceDocument } from "../dist/source.js";
@@ -53,7 +53,7 @@ test("parse analysis explains accepted and conflicting topology candidates", () 
   assert.deepEqual(parsed.analysis.unconsumedEvidence, []);
 });
 
-test("low-confidence semantic guesses stay visible without changing Diagram v1", () => {
+test("low-confidence semantic guesses stay visible without changing the Diagram", () => {
   const parsed = parseAscii("A\n|\nB\n\nThis is an ordinary explanatory note.\nIt continues as prose on the next line.");
   assert.deepEqual(parsed.diagram.groups, []);
   assert.ok(parsed.analysis.rejected.some(item => item.recognizer === "examples" && item.reason === "low-confidence"));
@@ -66,20 +66,18 @@ test("classification consumes ParseAnalysis directly", () => {
   assert.equal(classifyDiagram(analysis, { detection: "lenient" }).kind, "maybe");
 });
 
-test("Diagram v2 ids survive unrelated insertions while v1 ids stay compatible", () => {
-  const original = parseAsciiV2("A → B").diagram;
-  const withIntroduction = parseAsciiV2("Introduction\n\nA → B").diagram;
+test("Diagram ids survive unrelated insertions", () => {
+  const original = parseAscii("A → B").diagram;
+  const withIntroduction = parseAscii("Introduction\n\nA → B").diagram;
   const originalIds = new Map(original.nodes.map(node => [node.label, node.id]));
   const insertedIds = new Map(withIntroduction.nodes.map(node => [node.label, node.id]));
   assert.equal(insertedIds.get("A"), originalIds.get("A"));
   assert.equal(insertedIds.get("B"), originalIds.get("B"));
   assert.equal(withIntroduction.edges[0].id, original.edges[0].id);
-  assert.deepEqual(parseAscii("A → B").diagram.nodes.map(node => node.id), ["n1", "n2"]);
-  assert.equal(parseAscii("A → B").diagram.edges[0].id, "e1");
 });
 
-test("Diagram v2 exposes generic ports and renders without legacy route names", () => {
-  const diagram = parseAsciiV2("A → B").diagram;
+test("Diagram exposes generic ports and renders without recognizer-specific routes", () => {
+  const diagram = parseAscii("A → B").diagram;
   assert.equal(diagram.version, "2");
   assert.equal(diagram.edges[0].geometry.sourcePort, "right");
   assert.equal(diagram.edges[0].geometry.targetPort, "left");
@@ -89,29 +87,57 @@ test("Diagram v2 exposes generic ports and renders without legacy route names", 
   assert.match(svg, new RegExp(`data-node-id="${diagram.nodes[0].id}"`));
 });
 
-test("display columns account for CJK and emoji in Diagram v2 layout", () => {
+test("parseAscii exposes serializable source primitives", () => {
+  const input = "Root\n |\n---\n |\nLeaf";
+  const parsed = parseAscii(input);
+
+  assert.equal("tokens" in parsed, false);
+  assert.equal(parsed.primitives.version, "1");
+  assert.ok(parsed.primitives.items.length > 0);
+  assert.equal(parsed.primitives.connectors.length, 1);
+  assert.deepEqual(parsed.primitives.connectors[0].junctions, [{ row: 2, col: 1 }]);
+  assert.ok(parsed.primitives.connectors[0].paths.length >= 3);
+  assert.doesNotThrow(() => JSON.stringify(parsed.primitives));
+  assert.ok(parsed.analysis.accepted.filter(item => item.phase === "edge").every(item =>
+    item.evidence.some(id => id === parsed.primitives.connectors[0].id)
+  ));
+});
+
+test("semantic profiles isolate domain conventions from structural parsing", () => {
+  const input = "A\n|\nB\n\none\ntwo";
+  const compatible = parseAscii(input);
+  const structural = parseAscii(input, { semanticProfile: "none" });
+
+  assert.equal(compatible.diagram.groups[0]?.kind, "examples");
+  assert.deepEqual(structural.diagram.groups, []);
+  assert.ok(structural.diagram.edges.length > 0);
+  assert.equal(structural.analysis.accepted.some(item => item.recognizer === "examples"), false);
+  assert.equal(structural.analysis.rejected.some(item => item.recognizer === "examples"), false);
+});
+
+test("display columns account for CJK and emoji in Diagram layout", () => {
   const source = new SourceDocument("中文 → B");
   assert.equal(displayWidth("A中文😀"), 7);
   assert.equal(displayWidth("👨‍👩‍👧‍👦"), 2);
   assert.equal(displayWidth("🇨🇳"), 2);
   assert.equal(source.displayColumn(0, 3), 5);
-  const svg = renderSvg(parseAsciiV2("中文 → B").diagram, { mode: "preserve" });
+  const svg = renderSvg(parseAscii("中文 → B").diagram, { mode: "preserve" });
   assert.match(svg, /width="56"/);
 });
 
-test("Diagram v2 generic geometry covers branches, cycles, labels, and groups", () => {
-  const branch = parseAsciiV2("     Root\n      |\n  ---------\n  |   |   |\n  A   B   C").diagram;
+test("Diagram generic geometry covers branches, cycles, labels, and groups", () => {
+  const branch = parseAscii("     Root\n      |\n  ---------\n  |   |   |\n  A   B   C").diagram;
   assert.equal(branch.edges.length, 3);
   assert.ok(branch.edges.every(edge => edge.geometry.points.length >= 4));
   assert.doesNotMatch(JSON.stringify(branch), /sourceRoute/);
   assert.equal((renderSvg(branch).match(/<path class="edge"/g) ?? []).length, 3);
 
   const cycleInput = "              COMMERCIAL EVENT\n\n          ┌──────── Goods ────────┐\n          │                       ↓\n       Seller                   Buyer\n          ↑                       │\n          └──────── Money ────────┘";
-  const cycle = parseAsciiV2(cycleInput).diagram;
+  const cycle = parseAscii(cycleInput).diagram;
   assert.deepEqual(cycle.edges.map(edge => [edge.geometry.sourcePort, edge.geometry.targetPort]), [["top", "top"], ["bottom", "bottom"]]);
   assert.match(renderSvg(cycle), />Goods<|>Money</);
 
-  const examples = parseAsciiV2("A\n|\nB\n\none\ntwo").diagram;
+  const examples = parseAscii("A\n|\nB\n\none\ntwo").diagram;
   assert.equal(examples.groups[0].kind, "examples");
   assert.match(renderSvg(examples), /class="group"/);
 });

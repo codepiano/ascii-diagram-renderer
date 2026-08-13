@@ -8,16 +8,17 @@ test("recovers a vertical flow", () => {
   const result = parseAscii("World State\n    |\n    v\nObservation");
   assert.deepEqual(result.diagram.nodes.map(n => n.label), ["World State", "Observation"]);
   assert.equal(result.diagram.edges.length, 1);
-  assert.equal(result.diagram.version, "1");
+  assert.equal(result.diagram.version, "2");
   assert.deepEqual(result.diagram.diagnostics, []);
-  assert.deepEqual(result.diagram.edges[0], { ...result.diagram.edges[0], source: "n1", target: "n2" });
+  assert.equal(result.diagram.edges[0].source, result.diagram.nodes[0].id);
+  assert.equal(result.diagram.edges[0].target, result.diagram.nodes[1].id);
 });
 
 test("core subpath is renderer independent", async () => {
   const core = await import("../dist/core.js");
   const result = core.parseAscii("A\n|\nv\nB");
   assert.equal(result.diagram.nodes.length, 2);
-  assert.equal(typeof core.tokenize, "function");
+  assert.equal("tokenize" in core, false);
 });
 
 test("renders escaped labels as SVG text", () => {
@@ -29,7 +30,7 @@ test("renders escaped labels as SVG text", () => {
 
 test("unicode horizontal arrow reaches the target-side port", () => {
   const svg = asciiToSvg("Input → Output", { mode: "preserve" });
-  assert.match(svg, /M 89 38 L 92\.5 38 L 92\.5 38 L 96 38" marker-end="url\(#arrow\)"/);
+  assert.match(svg, /M 89 38 L 96 38" marker-end="url\(#arrow\)"/);
 });
 
 test("convenience SVG API does not render plain prose", () => {
@@ -41,7 +42,7 @@ test("preserve mode keeps a vertical source path straight", () => {
   const svg = asciiToSvg("World State\n    |\n    v\nObservation\n    |\n    v\nDecision", { mode: "preserve" });
   const paths = [...svg.matchAll(/<path class="edge" d="([^"]+)"/g)].map(match => match[1]);
   assert.equal(paths.length, diagram.edges.length);
-  assert.match(paths[1], /M 64\.5 142 L 64\.5 167 L 64\.5 167 L 64\.5 192/);
+  assert.equal(paths[1], "M 64.5 142 L 64.5 192");
 });
 
 test("preserve mode centers differently sized connected nodes on the ASCII axis", () => {
@@ -73,8 +74,10 @@ test("examples group centers on its parent while members stay left aligned", () 
   const parentCenter = Number(svg.match(/<text x="([\d.]+)" y="153"[^>]*>自己写各种adapter<\/text>/)?.[1]);
   const group = svg.match(/<g class="group"><rect x="(-?[\d.]+)" y="[\d.]+" width="([\d.]+)"/);
   assert.equal(Number(group?.[1]) + Number(group?.[2]) / 2, parentCenter);
-  const memberLefts = [...svg.matchAll(/data-node-id="n[4-7]"><rect class="text-node" x="(-?[\d.]+)"/g)].map(match => Number(match[1]));
-  assert.deepEqual(memberLefts, [memberLefts[0], memberLefts[0], memberLefts[0], memberLefts[0]]);
+  const nodeLefts = [...svg.matchAll(/data-node-id="[^"]+"><rect class="text-node" x="(-?[\d.]+)"/g)].map(match => Number(match[1]));
+  const memberLefts = nodeLefts.slice(-4);
+  assert.equal(memberLefts.length, 4);
+  assert.ok(memberLefts.every(left => left === memberLefts[0]));
 });
 
 test("branch routes preserve the horizontal trunk", () => {

@@ -1,28 +1,4 @@
-import type { Diagram, DiagramClassification, ParseAnalysis, ParseOptions, Token } from "./types.js";
-
-const legacyAnalysis = (tokens: Token[], diagram?: Diagram): ParseAnalysis => {
-  const arrows = tokens.filter(token => token.kind === "arrow");
-  const lines = tokens.filter((token): token is Extract<Token, { kind: "line" }> => token.kind === "line");
-  const nodes = tokens.filter(token => token.kind === "text" || token.kind === "box").length;
-  const boxes = tokens.filter(token => token.kind === "box").length;
-  const edgeCount = diagram?.edges.length ?? 0;
-  const resolvedArrows = diagram?.edges.filter(edge => edge.arrow === "normal").length ?? 0;
-  return {
-    accepted: [], rejected: [], unconsumedEvidence: [], diagnostics: diagram?.diagnostics ?? [],
-    metrics: {
-      nodeCount: nodes,
-      edgeCount,
-      groupCount: diagram?.groups.length ?? 0,
-      arrowCount: arrows.length,
-      unresolvedArrowCount: Math.max(0, arrows.length - resolvedArrows),
-      boxCount: boxes,
-      connectorComponentCount: lines.length,
-      verticalConnectorCellCount: lines.filter(line => line.orientation === "vertical").length,
-      likelyMarkdownList: arrows.length === 0 && lines.length > 0 && lines.every(line => line.orientation === "horizontal" && line.points.length === 1),
-      maxEdgeConfidence: edgeCount ? (arrows.length ? 0.98 : 0.92) : 0
-    }
-  };
-};
+import type { DiagramClassification, ParseAnalysis, ParseOptions } from "./types.js";
 
 function classifyAnalysis(analysis: ParseAnalysis, options: ParseOptions): DiagramClassification {
   const mode = options.detection ?? "strict";
@@ -53,8 +29,6 @@ function classifyAnalysis(analysis: ParseAnalysis, options: ParseOptions): Diagr
   };
 }
 
-export function classifyDiagram(analysis: ParseAnalysis, options?: ParseOptions): DiagramClassification;
-export function classifyDiagram(tokens: Token[], options?: ParseOptions, diagram?: Diagram): DiagramClassification;
-export function classifyDiagram(input: ParseAnalysis | Token[], options: ParseOptions = {}, diagram?: Diagram): DiagramClassification {
-  return classifyAnalysis(Array.isArray(input) ? legacyAnalysis(input, diagram) : input, options);
+export function classifyDiagram(analysis: ParseAnalysis, options: ParseOptions = {}): DiagramClassification {
+  return classifyAnalysis(analysis, options);
 }

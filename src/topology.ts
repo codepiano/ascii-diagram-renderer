@@ -1,6 +1,3 @@
-import { toDiagramV1, toDiagramV2, type CanonicalDiagram, type CanonicalEdge } from "./canonical.js";
-import { CharacterGrid } from "./grid.js";
-import { GlyphGraph } from "./glyph-graph.js";
 import { createStableId } from "./identity.js";
 import { createParseAnalysis } from "./parse-analysis.js";
 import { resolveCandidates, summarizeResolution } from "./recognition.js";
@@ -14,25 +11,16 @@ import {
   recognizeMultilineNodes,
   type TopologyContext
 } from "./topology-recognizers.js";
-import type { Diagram, DiagramNode, DiagramV2, ParseAnalysis, Token } from "./types.js";
+import type { Diagram, DiagramEdge, DiagramNode, ParseAnalysis, ParseOptions, PrimitiveDocument } from "./types.js";
 
-const nodeTokens = (tokens: Token[]) => tokens.filter((token): token is Extract<Token, { kind: "text" | "box" }> => token.kind === "text" || token.kind === "box");
 const edgeRecognizers = [recognizeArrowBranches, recognizeArrows, recognizeLineBranches, recognizeLineEdges];
 
-/**
- * Resolves independent interpretations into canonical topology, then adapts it
- * to the stable Diagram v1 contract. Recognizer registration order is not a
- * precedence mechanism; priorities and consumed evidence decide conflicts.
- */
-export function recoverTopology(tokens: Token[], source: { lines: string[]; width: number; height: number }, glyphs = new GlyphGraph(new CharacterGrid(source.lines.join("\n")))): Diagram {
-  return recoverTopologyWithAnalysis(tokens, source, glyphs).diagram;
-}
-
-export function recoverTopologyWithAnalysis(tokens: Token[], source: { lines: string[]; width: number; height: number }, glyphs = new GlyphGraph(new CharacterGrid(source.lines.join("\n")))): { diagram: Diagram; diagramV2: DiagramV2; analysis: ParseAnalysis } {
+/** Resolves independent interpretations into the single public Diagram IR. */
+export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, source: { lines: string[]; width: number; height: number }, options: ParseOptions = {}): { diagram: Diagram; analysis: ParseAnalysis } {
   const nodeOccurrences = new Map<string, number>();
-  let nodes: DiagramNode[] = nodeTokens(tokens).map(token => {
-    const label = token.kind === "box" ? token.label : token.text;
-    const shape = token.kind === "box" ? "box" : "text";
+  let nodes: DiagramNode[] = [...primitives.texts, ...primitives.boxes].sort((a, b) => a.bounds.top - b.bounds.top || a.bounds.left - b.bounds.left).map(primitive => {
+    const label = primitive.kind === "box" ? primitive.label : primitive.text;
+    const shape = primitive.kind === "box" ? "box" : "text";
     const fingerprint = `${shape}\u001f${label}`;
     const occurrence = (nodeOccurrences.get(fingerprint) ?? 0) + 1;
     nodeOccurrences.set(fingerprint, occurrence);
@@ -40,10 +28,10 @@ export function recoverTopologyWithAnalysis(tokens: Token[], source: { lines: st
       id: createStableId("node", [shape, label], occurrence),
       label,
       shape,
-      sourceBounds: token.bounds
+      sourceBounds: primitive.bounds
     };
   });
-  const nodeResolution = resolveCandidates(recognizeMultilineNodes(nodes, tokens), { minimumConfidence: 0.6 });
+  const nodeResolution = resolveCandidates(recognizeMultilineNodes(nodes, primitives), { minimumConfidence: 0.6 });
   const removedNodes = new Set(nodeResolution.accepted.flatMap(candidate => candidate.value.merge.members.filter(id => id !== candidate.value.merge.primary)));
   const nodeReplacements = new Map(nodeResolution.accepted.map(candidate => [candidate.value.merge.primary, candidate.value.merge]));
   nodes = nodes.filter(node => !removedNodes.has(node.id)).map(node => {
@@ -51,7 +39,7 @@ export function recoverTopologyWithAnalysis(tokens: Token[], source: { lines: st
     return replacement ? { ...node, label: replacement.label, sourceBounds: replacement.sourceBounds } : node;
   });
 
-  const context: TopologyContext = { nodes, tokens, source, glyphs };
+  const context: TopologyContext = { nodes, primitives, source };
   const cycleCandidates = recognizeCycles(context);
   const edgeResolution = resolveCandidates([
     ...cycleCandidates,
@@ -60,13 +48,13 @@ export function recoverTopologyWithAnalysis(tokens: Token[], source: { lines: st
   const excludedNodes = new Set(edgeResolution.accepted.flatMap(candidate => candidate.value.excludeNodes ?? []));
   nodes = nodes.filter(node => !excludedNodes.has(node.id));
 
-  const edges: CanonicalEdge[] = [];
+  const edges: DiagramEdge[] = [];
   const edgeOccurrences = new Map<string, number>();
   for (const candidate of edgeResolution.accepted) for (const proposed of candidate.value.edges) {
     const fingerprint = `${proposed.source}\u001f${proposed.target}\u001f${candidate.recognizer}\u001f${proposed.label?.text ?? ""}`;
     const occurrence = (edgeOccurrences.get(fingerprint) ?? 0) + 1;
     edgeOccurrences.set(fingerprint, occurrence);
-    const edge: CanonicalEdge = {
+    const edge: DiagramEdge = {
       ...proposed,
       id: createStableId("edge", [proposed.source, proposed.target, candidate.recognizer, proposed.label?.text ?? ""], occurrence),
       provenance: { recognizer: candidate.recognizer, evidence: candidate.evidence, confidence: candidate.confidence }
@@ -76,8 +64,9 @@ export function recoverTopologyWithAnalysis(tokens: Token[], source: { lines: st
     edges.push(edge);
   }
 
-  const groupContext: TopologyContext = { nodes, tokens, source, glyphs };
-  const groupResolution = resolveCandidates(recognizeExampleGroups(groupContext), { minimumConfidence: 0.6 });
+  const groupContext: TopologyContext = { nodes, primitives, source };
+  const groupCandidates = (options.semanticProfile ?? "llm-common") === "llm-common" ? recognizeExampleGroups(groupContext) : [];
+  const groupResolution = resolveCandidates(groupCandidates, { minimumConfidence: 0.6 });
   const groupOccurrences = new Map<string, number>();
   const groups = groupResolution.accepted.map(candidate => {
     const parts = [candidate.recognizer, candidate.value.parent ?? "", ...candidate.value.members];
@@ -95,14 +84,12 @@ export function recoverTopologyWithAnalysis(tokens: Token[], source: { lines: st
     : [];
 
   const consumedEvidence = new Set(edgeResolution.accepted.flatMap(candidate => candidate.consumes));
-  const unresolvedArrow = tokens.some((token, index) => token.kind === "arrow" && !consumedEvidence.has(`token:${index}`));
+  const unresolvedArrow = primitives.arrows.some(arrow => !consumedEvidence.has(arrow.id));
   if (unresolvedArrow) diagnostics.push({ code: "UNRESOLVED_ARROW", message: "One or more arrows could not be connected to two nodes.", severity: "warning" });
 
   const nodeOrder = new Map(nodes.map((node, index) => [node.id, index]));
   edges.sort((a, b) => (nodeOrder.get(a.source)! - nodeOrder.get(b.source)!) || (nodeOrder.get(a.target)! - nodeOrder.get(b.target)!));
-  const canonical: CanonicalDiagram = { version: "2", nodes, edges, groups, diagnostics, source };
-  const diagram = toDiagramV1(canonical);
-  const diagramV2 = toDiagramV2(canonical);
+  const diagram: Diagram = { version: "2", nodes, edges, groups, diagnostics, source };
   const nodeSummary = summarizeResolution("node", nodeResolution);
   const edgeSummary = summarizeResolution("edge", edgeResolution);
   const groupSummary = summarizeResolution("group", groupResolution);
@@ -117,8 +104,7 @@ export function recoverTopologyWithAnalysis(tokens: Token[], source: { lines: st
     ...groupSummary.rejected
   ];
   const analysis = createParseAnalysis({
-    tokens,
-    glyphs,
+    primitives,
     nodeCount: nodes.length,
     edgeCount: edges.length,
     groupCount: groups.length,
@@ -126,5 +112,5 @@ export function recoverTopologyWithAnalysis(tokens: Token[], source: { lines: st
     rejected,
     diagnostics
   });
-  return { diagram, diagramV2, analysis };
+  return { diagram, analysis };
 }

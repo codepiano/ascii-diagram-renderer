@@ -70,11 +70,11 @@ const input = `+-----------+
 | Validate  |
 +-----------+`;
 
-const { diagram, classification, analysis, tokens } = parseAscii(input);
+const { diagram, primitives, classification, analysis } = parseAscii(input);
 
 console.log(classification);
 // { kind: "diagram", confidence: ..., reasons: [...] }
-console.log(diagram.nodes, diagram.edges, tokens);
+console.log(diagram.nodes, diagram.edges, primitives.connectors);
 console.log(analysis.accepted, analysis.rejected);
 
 if (classification.kind === "diagram") {
@@ -110,13 +110,13 @@ const svg = asciiToSvg(flow, {
 
 | 导入 | 用途 |
 | --- | --- |
-| `ascii-diagram-renderer` | v1/v2 解析、类型、SVG 渲染和严格便捷 API |
-| `ascii-diagram-renderer/core` | 无 DOM 的 `parseAscii` / `parseAsciiV2`，以及为兼容保留的低层 API |
-| `ascii-diagram-renderer/svg` | `renderSvg`、`renderSvgV2`、`renderLayoutedSvg` |
+| `ascii-diagram-renderer` | 解析、类型、SVG 渲染和严格便捷 API |
+| `ascii-diagram-renderer/core` | 无 DOM 的 `parseAscii`、分类器和公共类型 |
+| `ascii-diagram-renderer/svg` | `renderSvg` |
 
 ### `parseAscii(input, options?)`
 
-返回 `{ grid, tokens, diagram, classification, analysis }`。`options.detection` 可为：
+返回 `{ primitives, diagram, classification, analysis }`。`options.detection` 可为：
 
 - `"strict"`：要求恢复出节点关系或发现强结构证据，适合自动渲染（`asciiToSvg` 固定使用该模式）。
 - `"lenient"`：未恢复出关系但存在多个节点和图形符号时返回 `maybe`，适合人工确认流程。
@@ -125,18 +125,20 @@ const svg = asciiToSvg(flow, {
 
 ```ts
 {
-  version: "1",
+  version: "2",
   nodes: [{ id, label, shape, sourceBounds }],
-  edges: [{ id, source, target, direction, sourcePath }],
-  groups: [{ id, kind, members }],
+  edges: [{ id, source, target, geometry, markerEnd, provenance }],
+  groups: [{ id, kind, members, provenance }],
   diagnostics: [],
   source: { lines, width, height },
 }
 ```
 
-`Diagram v1` 是稳定兼容边界。内部解析器先生成带通用折线 geometry 和识别证据的 canonical IR，再通过适配器生成上述结构；因此新增识别规则不需要把规则名称扩散到公共 IR。
+`Diagram` 是唯一 IR：节点、边和分组使用稳定内容 ID；edge 使用通用 polyline geometry，并在 edge/group 上保留识别 provenance。渲染器直接消费该结构，不存在另一套兼容 IR 或 recognizer 专用路由字段。
 
-`analysis` 用来解释解析过程，而不改变 Diagram v1：
+`primitives` 是带独立版本号的可序列化源事实文档，包含 text、box、arrow 和 connector component；connector 具有 cells、端点、junction 和 paths，供诊断和后续 recognizer 使用。
+
+`analysis` 用来解释解析过程，而不改变 Diagram：
 
 ```ts
 {
@@ -150,33 +152,12 @@ const svg = asciiToSvg(flow, {
 
 例如，一个普通说明段落可能产生低置信度的 `examples` 候选。该候选不会写入 `diagram.groups`，但会以 `reason: "low-confidence"` 保留在 `analysis.rejected`，调用方可以解释为什么没有采用它。
 
-### `parseAsciiV2(input, options?)`
-
-当调用方需要长期引用节点、检查识别证据或直接消费通用路由时，可以显式选择 Diagram v2：
-
-```ts
-import { parseAsciiV2 } from "ascii-diagram-renderer/core";
-import { renderSvg } from "ascii-diagram-renderer/svg";
-
-const parsed = parseAsciiV2("输入 → 处理 → 输出");
-
-console.log(parsed.diagram.version); // "2"
-console.log(parsed.diagram.nodes[0].id); // 稳定的内容身份 ID
-console.log(parsed.diagram.edges[0].geometry);
-
-const svg = renderSvg(parsed.diagram);
-```
-
-Diagram v2 与 v1 的主要区别：
-
-- 节点、边和分组使用稳定内容 ID；在前面插入无关节点不会导致已有 ID 整体重编号。
-- edge 使用 `{ kind: "polyline", points, sourcePort, targetPort }`，不包含 `sourceRoute: "branch" | "cycle"` 等 renderer 特例。
-- edge/group 保留 `recognizer`、`confidence` 和 `evidence` provenance。
-- preserve SVG 使用 Unicode 显示列计算 CJK、全角字符和 emoji 的位置与宽度。
-
-`renderSvg` 会根据 `version` 自动接受 Diagram v1 或 v2；也可以用 `renderSvgV2` 明确限制输入。严格便捷入口 `asciiToSvgV2(input, options?)` 与 `asciiToSvg` 行为相同，只在分类为 `diagram` 时返回 SVG。
-
 稳定 ID 基于语义内容和同内容出现次数，而不是数组位置。若同名同形节点自身被重新排序，其 occurrence 后缀可能变化；需要跨任意语义编辑保持身份时，调用方仍应维护自己的持久映射。
+
+`options.semanticProfile` 控制领域语义推断：
+
+- `"llm-common"`（默认）保留兼容行为，例如识别常见 LLM 输出中的 examples 分组。
+- `"none"` 只恢复结构，不运行这些领域约定；箭头、连线、分支和环等结构识别不受影响。
 
 ### 解析架构
 
@@ -184,12 +165,12 @@ Diagram v2 与 v1 的主要区别：
 
 1. `SourceDocument` 统一换行、Unicode 字符坐标和文本切片。
 2. `GlyphGraph` 将 `│`、`─`、`┼` 等字符表示为带 north/east/south/west 端口的二维连接图，并生成 connector components、端点、junction 和可追踪路径。
-3. tokenizer 提取文本、盒子、线和箭头等源事实。
-4. cycle、branch、arrow、line、group recognizer 分别提交带置信度、证据和资源占用的候选解释。
+3. tokenizer 在包内部识别字符级事实；primitive extraction 将文本、盒子、箭头和 GlyphGraph 连接组件统一为可序列化的 `PrimitiveDocument`。
+4. cycle、branch、arrow、line、group recognizer 只消费 primitive 与节点上下文，分别提交带置信度、证据和资源占用的候选解释。
 5. resolver 按明确优先级和证据冲突选择解释；recognizer 的注册顺序不决定结果。
-6. canonical IR 原生形成 Diagram v2；Diagram v1 由兼容 adapter 生成，分类器只读取同一次裁决产生的 `ParseAnalysis`。
+6. resolver 的结果直接形成唯一 `Diagram`，分类器只读取同一次裁决产生的 `ParseAnalysis`，SVG renderer 直接消费 Diagram。
 
-新增内置语法时，应优先增加独立 recognizer 和 fixture，而不是在 `recoverTopology` 中加入依赖执行顺序的条件。source、glyph、candidate 和 canonical 构建过程保持为包内实现细节；`CharacterGrid`、`tokenize`、`recoverTopology` 和 token 形式的 `classifyDiagram` 仅为既有兼容与诊断用途继续导出。现有集成继续使用 `parseAscii`，需要稳定身份和通用 geometry 的新集成使用 `parseAsciiV2`。
+新增内置语法时，应优先增加独立 recognizer 和 fixture，而不是在 topology orchestration 中加入依赖执行顺序的条件。纯领域约定应放入显式 semantic profile，而不是混入结构 recognizer。source、glyph 和 tokenizer 保持为包内实现细节；公共扩展边界是 `PrimitiveDocument`、`ParseAnalysis` 与 `Diagram`。
 
 ### `renderSvg(diagram, options?)`
 

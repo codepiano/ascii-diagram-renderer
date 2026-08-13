@@ -1,5 +1,5 @@
 import { SourceDocument, displayWidth } from "./source.js";
-import type { DiagramV2, DiagramV2Edge, EdgePort, RenderOptions } from "./types.js";
+import type { Diagram, DiagramEdge, EdgePort, RenderOptions } from "./types.js";
 
 type Position = { x: number; y: number; w: number; h: number };
 type PixelPoint = { x: number; y: number };
@@ -13,7 +13,7 @@ const portPoint = (position: Position, port: EdgePort): PixelPoint => {
   return { x: position.x + position.w, y: midpoint.y };
 };
 
-export function renderSvgV2(diagram: DiagramV2, options: RenderOptions = {}): string {
+export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string {
   const cellWidth = options.cellWidth ?? 9, cellHeight = options.cellHeight ?? 28, padding = options.padding ?? 24, fontSize = options.fontSize ?? 16;
   const source = new SourceDocument(diagram.source.lines.join("\n"));
   const positions = new Map<string, Position>();
@@ -67,7 +67,7 @@ export function renderSvgV2(diagram: DiagramV2, options: RenderOptions = {}): st
       y += position.h + 10;
     }
   }
-  const edgePoints = (edge: DiagramV2Edge): PixelPoint[] => {
+  const edgePoints = (edge: DiagramEdge): PixelPoint[] => {
     const sourcePosition = positions.get(edge.source)!, targetPosition = positions.get(edge.target)!;
     if (options.mode === "reflow") {
       const start = portPoint(sourcePosition, edge.geometry.sourcePort), end = portPoint(targetPosition, edge.geometry.targetPort);
@@ -76,11 +76,14 @@ export function renderSvgV2(diagram: DiagramV2, options: RenderOptions = {}): st
         ? [start, { x: start.x, y: (start.y + end.y) / 2 }, { x: end.x, y: (start.y + end.y) / 2 }, end]
         : [start, { x: (start.x + end.x) / 2, y: start.y }, { x: (start.x + end.x) / 2, y: end.y }, end];
     }
-    return [
+    const points = [
       portPoint(sourcePosition, edge.geometry.sourcePort),
       ...edge.geometry.points.slice(1, -1).map(pixel),
       portPoint(targetPosition, edge.geometry.targetPort)
     ].filter((point, index, points) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y);
+    const horizontal = points.every(point => point.y === points[0].y);
+    const vertical = points.every(point => point.x === points[0].x);
+    return horizontal || vertical ? [points[0], points.at(-1)!] : points;
   };
   const routedPoints = diagram.edges.flatMap(edgePoints);
   const labelPoints = diagram.edges.filter(edge => edge.label).map(edge => pixel(edge.label!.point));

@@ -5,7 +5,8 @@ export type Severity = "info" | "warning" | "error";
 export type Diagnostic = { code: string; message: string; severity: Severity; source?: Bounds };
 export type DiagramKind = "diagram" | "maybe" | "text";
 export type DiagramClassification = { kind: DiagramKind; confidence: number; reasons: string[] };
-export type ParseOptions = { detection?: "strict" | "lenient" };
+export type SemanticProfile = "none" | "llm-common";
+export type ParseOptions = { detection?: "strict" | "lenient"; semanticProfile?: SemanticProfile };
 export type RecognitionPhase = "node" | "edge" | "group";
 export type RecognitionSummary = {
   id: string;
@@ -38,12 +39,30 @@ export type ParseAnalysis = {
   diagnostics: Diagnostic[];
 };
 
-export type Token =
-  | { kind: "text"; text: string; bounds: Bounds }
-  | { kind: "line"; orientation: "horizontal" | "vertical"; points: Point[] }
-  | { kind: "junction"; point: Point }
-  | { kind: "arrow"; direction: "up" | "down" | "left" | "right"; point: Point }
-  | { kind: "box"; bounds: Bounds; label: string };
+export type PrimitiveText = { id: string; kind: "text"; text: string; bounds: Bounds };
+export type PrimitiveBox = { id: string; kind: "box"; label: string; bounds: Bounds };
+export type PrimitiveArrow = { id: string; kind: "arrow"; direction: "up" | "down" | "left" | "right"; point: Point };
+export type ConnectorPort = "north" | "east" | "south" | "west";
+export type PrimitiveConnectorCell = { point: Point; char: string; ports: ConnectorPort[] };
+export type PrimitiveConnectorPath = { id: string; points: Point[]; closed: boolean };
+export type PrimitiveConnector = {
+  id: string;
+  kind: "connector";
+  bounds: Bounds;
+  cells: PrimitiveConnectorCell[];
+  endpoints: Point[];
+  junctions: Point[];
+  paths: PrimitiveConnectorPath[];
+};
+export type SourcePrimitive = PrimitiveText | PrimitiveBox | PrimitiveArrow | PrimitiveConnector;
+export type PrimitiveDocument = {
+  version: "1";
+  items: SourcePrimitive[];
+  texts: PrimitiveText[];
+  boxes: PrimitiveBox[];
+  arrows: PrimitiveArrow[];
+  connectors: PrimitiveConnector[];
+};
 
 export type DiagramNode = {
   id: string;
@@ -53,24 +72,9 @@ export type DiagramNode = {
   metadata?: Record<string, unknown>;
 };
 
-export type DiagramEdge = {
-  id: string;
-  source: string;
-  target: string;
-  direction: "up" | "down" | "left" | "right";
-  sourcePath: Point[];
-  sourceRoute?: "vertical" | "horizontal" | "orthogonal" | "branch" | "cycle";
-  arrow?: "none" | "normal";
-  /** Text carried by a connection rather than a standalone diagram node. */
-  label?: string;
-  labelPoint?: Point;
-};
-
-export type DiagramGroup = { id: string; kind: "examples" | "group"; label?: string; parent?: string; members: string[]; sourceBounds?: Bounds };
-
 export type EdgePort = "top" | "right" | "bottom" | "left";
 export type RecognitionProvenance = { recognizer: string; evidence: string[]; confidence: number };
-export type DiagramV2Edge = {
+export type DiagramEdge = {
   id: string;
   source: string;
   target: string;
@@ -80,28 +84,23 @@ export type DiagramV2Edge = {
   label?: { text: string; point: Point };
   provenance: RecognitionProvenance;
 };
-export type DiagramV2Group = Omit<DiagramGroup, "id"> & { id: string; provenance: RecognitionProvenance };
-export type DiagramV2 = {
-  version: "2";
-  nodes: DiagramNode[];
-  edges: DiagramV2Edge[];
-  groups: DiagramV2Group[];
-  diagnostics: Diagnostic[];
-  source: { lines: string[]; width: number; height: number };
+export type DiagramGroup = {
+  id: string;
+  kind: "examples" | "group";
+  label?: string;
+  parent?: string;
+  members: string[];
+  sourceBounds?: Bounds;
+  provenance: RecognitionProvenance;
 };
-
 export type Diagram = {
+  version: "2";
   nodes: DiagramNode[];
   edges: DiagramEdge[];
   groups: DiagramGroup[];
-  version: "1";
   diagnostics: Diagnostic[];
   source: { lines: string[]; width: number; height: number };
 };
-
-export type LayoutedNode = DiagramNode & { layout: { x: number; y: number; width: number; height: number } };
-export type LayoutedEdge = DiagramEdge & { layout: { points: Point[] } };
-export type LayoutedDiagram = { diagram: Diagram; nodes: LayoutedNode[]; edges: LayoutedEdge[] };
 
 export type RenderOptions = {
   mode?: "preserve" | "reflow";
