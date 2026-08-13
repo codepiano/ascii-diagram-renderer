@@ -183,6 +183,8 @@ const diagramIssues = validateDiagram(diagram, primitives);
 
 新增内置语法时，应增加独立 recognizer、registry declaration 和 fixture，而不是修改 topology orchestration。纯领域约定应放入显式 semantic profile，而不是混入结构 recognizer。source 与 glyph 保持为包内实现细节；公共数据边界是 `PrimitiveDocument`、`ParseAnalysis` 与 `Diagram`。
 
+测试除了真实回归 fixture，还包含三类架构保护：空白、换行和 ASCII/Unicode 等价变换必须保持拓扑语义；倒置 registry 注册顺序不得改变结果；固定随机种子的 500 组输入不得逃逸 parser invariants。横向 ASCII 箭头仅在 `->` / `<-` 形式下识别，因此 `A < B` 仍是普通文本。
+
 ### `renderSvg(diagram, options?)`
 
 渲染选项包括：

@@ -40,6 +40,7 @@ test("recognizer registry declares unique phase, profile, and confidence policy"
   assert.ok(recognizerRegistry.every(definition => ["node", "edge", "group"].includes(definition.phase)));
   assert.ok(recognizerRegistry.every(definition => ["structural", "llm-common"].includes(definition.profile)));
   assert.ok(recognizerRegistry.every(definition => definition.minimumConfidence >= 0 && definition.minimumConfidence <= 1));
+  assert.ok(recognizerRegistry.every(definition => definition.outputs.length > 0));
 
   const resolution = resolveCandidates([{
     id: "below-own-threshold", recognizer: "test", priority: 1, confidence: 0.5,

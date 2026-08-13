@@ -7,7 +7,7 @@ const vertical = new Set(["|", "│", "║", "┃"]);
 const horizontal = new Set(["-", "─", "═", "━"]);
 const arrows: Record<string, PrimitiveArrow["direction"]> = {
   "^": "up", "↑": "up", "v": "down", "▼": "down", "↓": "down",
-  "←": "left", "→": "right", "▶": "right"
+  "<": "left", "←": "left", ">": "right", "→": "right", "▶": "right"
 };
 const boxCorners = new Set(["+", "┌", "┐", "└", "┘", "╭", "╮", "╰", "╯"]);
 const connectorCharacters = new Set([
@@ -25,6 +25,8 @@ export function extractPrimitives(grid: CharacterGrid, glyphs: GlyphGraph): Prim
   const pointKey = (point: Point) => `${point.row}:${point.col}`;
   const isArrowAt = (row: number, col: number) => {
     const character = at(row, col);
+    if (character === ">") return horizontal.has(at(row, col - 1));
+    if (character === "<") return horizontal.has(at(row, col + 1));
     if (character !== "v" && character !== "^") return Boolean(arrows[character]);
     return grid.isBlank({ row, col: col - 1 }) && grid.isBlank({ row, col: col + 1 });
   };
