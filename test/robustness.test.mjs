@@ -72,6 +72,20 @@ test("TextRuns grow into conservative multiline node regions", () => {
   const barrier = parseAscii("alpha\n-----\nbeta");
   assert.deepEqual(barrier.regions.map(region => region.label), ["alpha", "beta"]);
   assert.equal(barrier.analysis.accepted.some(item => item.recognizer === "multiline-region"), false);
+
+  const wrappedList = parseAscii([
+    "[Models 思考与沟通工具]",
+    "上下文图 / 概念模型 / 场景 / 目标模型 /",
+    "实例化规格 / 形式化属性"
+  ].join("\n"));
+  assert.deepEqual(wrappedList.regions.map(region => region.label), [
+    "[Models 思考与沟通工具]\n上下文图 / 概念模型 / 场景 / 目标模型 /\n实例化规格 / 形式化属性"
+  ]);
+
+  const processTitle = parseAscii("[Process 需求工程过程]\n启动 -> 探索 -> 决策");
+  assert.deepEqual(processTitle.regions.map(region => region.label), [
+    "[Process 需求工程过程]", "启动", "探索", "决策"
+  ]);
 });
 
 const recoverWith = (input, runner) => {

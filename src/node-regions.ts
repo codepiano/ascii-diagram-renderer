@@ -9,6 +9,9 @@ export type NodeRegionContext = {
 const centerColumn = (run: TextRun) => (run.bounds.left + run.bounds.right) / 2;
 const overlapWidth = (a: Bounds, b: Bounds) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left) + 1);
 const runWidth = (run: TextRun) => run.bounds.right - run.bounds.left + 1;
+const isBracketedLabel = (run: TextRun) => /^\[[^\]]+\]$/.test(run.text.trim());
+const isDelimitedContinuation = (upper: TextRun, lower: TextRun) =>
+  /[/／]\s*$/.test(upper.text) && /[/／]/.test(lower.text);
 const regionBounds = (runs: TextRun[]): Bounds => ({
   top: Math.min(...runs.map(run => run.bounds.top)),
   left: Math.min(...runs.map(run => run.bounds.left)),
@@ -46,11 +49,18 @@ const regionPolicy = {
   baseConfidence: 0.48,
   alignmentWeight: 0.12,
   connectorAnchorWeight: 0.18,
+  delimitedContinuationWeight: 0.18,
   prosePenalty: 0.3
 } as const;
 
-const adjacencyScore = (upper: TextRun, lower: TextRun) => {
+const adjacencyScore = (upper: TextRun, lower: TextRun, context: NodeRegionContext) => {
   if (lower.bounds.top !== upper.bounds.bottom + 1) return 0;
+  // A bracketed label can introduce plain text content, but not a row that is
+  // itself part of a connector topology (for example, a horizontal process).
+  const lowerRowHasTopology = context.primitives.connectors.some(connector =>
+    connector.cells.some(cell => cell.point.row === lower.bounds.top)
+  ) || context.primitives.arrows.some(arrow => arrow.point.row === lower.bounds.top);
+  if (isBracketedLabel(upper) && !isBracketedLabel(lower) && lowerRowHasTopology) return 0;
   const overlap = overlapWidth(upper.bounds, lower.bounds);
   const minWidth = Math.min(runWidth(upper), runWidth(lower));
   const overlapRatio = minWidth ? overlap / minWidth : 0;
@@ -59,13 +69,13 @@ const adjacencyScore = (upper: TextRun, lower: TextRun) => {
   return overlapRatio * 0.7 + alignment * 0.3;
 };
 
-const bestAdjacencies = (runs: TextRun[]) => {
+const bestAdjacencies = (runs: TextRun[], context: NodeRegionContext) => {
   const byRow = new Map<number, TextRun[]>();
   for (const run of runs) byRow.set(run.bounds.top, [...(byRow.get(run.bounds.top) ?? []), run]);
   const matches: Adjacency[] = [];
   for (const [row, upperRuns] of byRow) {
     const lowerRuns = byRow.get(row + 1) ?? [];
-    const candidates = upperRuns.flatMap(upper => lowerRuns.map(lower => ({ upper, lower, score: adjacencyScore(upper, lower) }))).filter(match => match.score >= regionPolicy.minimumAdjacency);
+    const candidates = upperRuns.flatMap(upper => lowerRuns.map(lower => ({ upper, lower, score: adjacencyScore(upper, lower, context) }))).filter(match => match.score >= regionPolicy.minimumAdjacency);
     const bestByUpper = new Map<string, Adjacency>(), bestByLower = new Map<string, Adjacency>();
     for (const candidate of candidates) {
       const upperBest = bestByUpper.get(candidate.upper.id);
@@ -114,19 +124,22 @@ const adjacentConnectorIds = (document: PrimitiveDocument, bounds: Bounds, row: 
  * connectors may anchor the outside of a region but are never crossed.
  */
 export function recognizeMultilineRegions(context: NodeRegionContext): Array<RecognitionCandidate<NodeRegionInterpretation>> {
-  const adjacencies = bestAdjacencies(context.primitives.textRuns);
+  const adjacencies = bestAdjacencies(context.primitives.textRuns, context);
   return connectedComponents(context.primitives.textRuns, adjacencies).map(runs => {
     const value = region(runs);
     const relevant = adjacencies.filter(match => value.runIds.includes(match.upper.id) && value.runIds.includes(match.lower.id));
     const alignment = relevant.reduce((sum, match) => sum + match.score, 0) / relevant.length;
     const above = adjacentConnectorIds(context.primitives, value.bounds, value.bounds.top - 1, "south");
     const below = adjacentConnectorIds(context.primitives, value.bounds, value.bounds.bottom + 1, "north");
-    const looksLikeProse = runs.some(run => run.text.length > 32 || /[.!?。！？]$/.test(run.text));
+    const ordered = [...runs].sort((a, b) => a.bounds.top - b.bounds.top || a.bounds.left - b.bounds.left);
+    const hasDelimitedContinuation = ordered.slice(0, -1).some((run, index) => isDelimitedContinuation(run, ordered[index + 1]));
+    const looksLikeProse = !hasDelimitedContinuation && runs.some(run => run.text.length > 32 || /[.!?。！？]$/.test(run.text));
     const confidence = Math.max(0, Math.min(1,
       regionPolicy.baseConfidence +
       alignment * regionPolicy.alignmentWeight +
       (above.length ? regionPolicy.connectorAnchorWeight : 0) +
-      (below.length ? regionPolicy.connectorAnchorWeight : 0) -
+      (below.length ? regionPolicy.connectorAnchorWeight : 0) +
+      (hasDelimitedContinuation ? regionPolicy.delimitedContinuationWeight : 0) -
       (looksLikeProse ? regionPolicy.prosePenalty : 0)
     ));
     return {
