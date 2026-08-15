@@ -5,6 +5,7 @@ import {
   recognizeArrowBranches,
   recognizeCycles,
   recognizeExampleGroups,
+  recognizeSectionGroups,
   recognizeLineBranches,
   recognizeLineEdges,
   type EdgeInterpretation,
@@ -44,7 +45,8 @@ export const recognizerRegistry: readonly RecognizerDefinition[] = [
   { id: "arrow", outputs: ["arrow"], phase: "edge", profile: "structural", minimumConfidence: 0.6, recognize: recognizeArrows },
   { id: "line-branch", outputs: ["line-branch"], phase: "edge", profile: "structural", minimumConfidence: 0.6, recognize: recognizeLineBranches },
   { id: "line-edge", outputs: ["vertical-line", "horizontal-line"], phase: "edge", profile: "structural", minimumConfidence: 0.6, recognize: recognizeLineEdges },
-  { id: "examples", outputs: ["examples"], phase: "group", profile: "llm-common", minimumConfidence: 0.6, recognize: recognizeExampleGroups }
+  { id: "examples", outputs: ["examples"], phase: "group", profile: "llm-common", minimumConfidence: 0.6, recognize: recognizeExampleGroups },
+  { id: "section", outputs: ["section"], phase: "group", profile: "llm-common", minimumConfidence: 0.7, recognize: recognizeSectionGroups }
 ];
 
 const enabled = (definition: RecognizerDefinition, semanticProfile: SemanticProfile) =>

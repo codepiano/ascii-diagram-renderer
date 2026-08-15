@@ -52,7 +52,7 @@ export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, sourc
   const groupContext: TopologyContext = { nodes, primitives, source };
   const groupResolution = resolveCandidates(recognizers.runGroups(groupContext, semanticProfile));
   const groupOccurrences = new Map<string, number>();
-  const groups = groupResolution.accepted.map(candidate => {
+  let groups = groupResolution.accepted.map(candidate => {
     const parts = [candidate.recognizer, candidate.value.parent ?? "", ...candidate.value.members];
     const fingerprint = parts.join("\u001f");
     const occurrence = (groupOccurrences.get(fingerprint) ?? 0) + 1;
@@ -63,6 +63,50 @@ export function recoverTopologyWithAnalysis(primitives: PrimitiveDocument, sourc
       provenance: { recognizer: candidate.recognizer, evidence: candidate.evidence, confidence: candidate.confidence }
     };
   });
+  for (const section of groups.filter(group => group.kind === "group" && group.parent)) {
+    const parent = nodes.find(node => node.id === section.parent);
+    if (!parent) continue;
+    parent.metadata = {
+      ...(parent.metadata ?? {}),
+      section: { title: parent.label, contentNodeIds: [...section.members] }
+    };
+  }
+  for (const node of nodes) {
+    const lines = node.label.split("\n");
+    if (lines.length > 1 && /^\[[^\]]+\]/.test(lines[0].trim())) {
+      node.metadata = {
+        ...(node.metadata ?? {}),
+        section: { title: lines[0], content: lines.slice(1) }
+      };
+    }
+  }
+  const sectionMemberIds = new Set<string>();
+  for (const section of groups.filter(group => group.kind === "group" && group.parent)) {
+    const parent = nodes.find(node => node.id === section.parent);
+    const members = nodes.filter(node => section.members.includes(node.id));
+    if (!parent || !members.length) continue;
+    const row = Math.min(...members.map(member => member.sourceBounds.top));
+    const content = source.lines[row]?.trim() ?? members.map(member => member.label).join(" -> ");
+    parent.label = `${parent.label}\n${content}`;
+    parent.sourceBounds = {
+      top: parent.sourceBounds.top,
+      left: Math.min(parent.sourceBounds.left, ...members.map(member => member.sourceBounds.left)),
+      bottom: Math.max(parent.sourceBounds.bottom, ...members.map(member => member.sourceBounds.bottom)),
+      right: Math.max(parent.sourceBounds.right, ...members.map(member => member.sourceBounds.right))
+    };
+    parent.metadata = {
+      ...(parent.metadata ?? {}),
+      section: { title: parent.label.split("\n")[0], content: { kind: "inline-flow", text: content } }
+    };
+    members.forEach(member => sectionMemberIds.add(member.id));
+  }
+  if (sectionMemberIds.size) {
+    nodes = nodes.filter(node => !sectionMemberIds.has(node.id));
+    for (let index = edges.length - 1; index >= 0; index--) {
+      if (sectionMemberIds.has(edges[index].source) || sectionMemberIds.has(edges[index].target)) edges.splice(index, 1);
+    }
+    groups = groups.filter(group => group.kind !== "group");
+  }
   const diagnostics: Diagram["diagnostics"] = nodes.length === 0
     ? [{ code: "NO_NODES", message: "No supported diagram nodes were found.", severity: "warning" }]
     : [];

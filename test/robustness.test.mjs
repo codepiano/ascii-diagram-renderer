@@ -86,6 +86,13 @@ test("TextRuns grow into conservative multiline node regions", () => {
   assert.deepEqual(processTitle.regions.map(region => region.label), [
     "[Process 需求工程过程]", "启动", "探索", "决策"
   ]);
+  const processNode = processTitle.diagram.nodes.find(node => node.label.startsWith("[Process"));
+  assert.deepEqual(processTitle.diagram.nodes.map(node => node.label), [
+    "[Process 需求工程过程]\n启动 -> 探索 -> 决策"
+  ]);
+  const processWithNext = parseAscii("[Process 需求工程过程]\n启动 -> 探索 -> 决策\n        |\n        v\n[Models 思考与沟通工具]");
+  const processWithNextNode = processWithNext.diagram.nodes.find(node => node.label.startsWith("[Process"));
+  assert.equal(processWithNext.diagram.edges.find(edge => edge.direction === "down")?.source, processWithNextNode?.id);
 });
 
 const recoverWith = (input, runner) => {

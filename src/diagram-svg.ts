@@ -81,6 +81,14 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
       y += position.h + 10;
     }
   }
+  for (const group of diagram.groups.filter(group => group.kind === "group")) {
+    const parent = group.parent ? positions.get(group.parent) : undefined;
+    const members = group.members.map(id => positions.get(id)).filter(Boolean) as Position[];
+    if (!parent || !members.length) continue;
+    parent.h = Math.max(parent.h, 50);
+    const contentTop = parent.y + parent.h + 12;
+    for (const member of members) member.y = contentTop;
+  }
   const edgePoints = (edge: DiagramEdge): PixelPoint[] => {
     const sourcePosition = positions.get(edge.source)!, targetPosition = positions.get(edge.target)!;
     if (options.mode === "reflow") {
@@ -95,6 +103,10 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
       ...edge.geometry.points.slice(1, -1).map(pixel),
       portPoint(targetPosition, edge.geometry.targetPort)
     ].filter((point, index, points) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y);
+    const sectionContentNodeIds = new Set(diagram.groups.filter(group => group.kind === "group").flatMap(group => group.members));
+    if ((edge.direction === "right" || edge.direction === "left") && sectionContentNodeIds.has(edge.source) && sectionContentNodeIds.has(edge.target) && points.length >= 2) {
+      return [points[0], points.at(-1)!];
+    }
     const horizontal = points.every(point => point.y === points[0].y);
     const vertical = points.every(point => point.x === points[0].x);
     return horizontal || vertical ? [points[0], points.at(-1)!] : points;
@@ -114,12 +126,24 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
     const point = pixel(edge.label!.point);
     return `<text class="edge-label" x="${point.x}" y="${point.y}" text-anchor="middle" dominant-baseline="middle">${esc(edge.label!.text)}</text>`;
   }).join("");
-  const groups = diagram.groups.map(group => {
+  const groups = diagram.groups.filter(group => group.kind === "examples").map(group => {
     const members = group.members.map(id => positions.get(id)).filter(Boolean) as Position[];
     if (!members.length) return "";
     const left = Math.min(...members.map(position => position.x)) - 14, top = Math.min(...members.map(position => position.y)) - 14;
     const right = Math.max(...members.map(position => position.x + position.w)) + 14, bottom = Math.max(...members.map(position => position.y + position.h)) + 14;
     return `<g class="group"><rect x="${left}" y="${top}" width="${right - left}" height="${bottom - top}" rx="10"/><text x="${left + 10}" y="${top + 14}">${esc(group.label ?? group.kind)}</text></g>`;
+  }).join("");
+  const sectionParents = new Set([
+    ...diagram.groups.filter(group => group.kind === "group" && group.parent).map(group => group.parent!),
+    ...diagram.nodes.filter(node => Boolean(node.metadata && "section" in node.metadata)).map(node => node.id)
+  ]);
+  const sectionSeparators = diagram.nodes.filter(node => {
+    const section = node.metadata?.section;
+    return Boolean(section && typeof section === "object" && "content" in section);
+  }).map(node => {
+    const position = positions.get(node.id)!;
+    const y = position.y + position.h / 3 + 4;
+    return `<line class="section-separator" x1="${position.x + 16}" y1="${y}" x2="${position.x + position.w - 16}" y2="${y}"/>`;
   }).join("");
   const nodes = diagram.nodes.map(node => {
     const position = positions.get(node.id)!;
@@ -127,8 +151,8 @@ export function renderSvg(diagram: Diagram, options: RenderOptions = {}): string
     const lines = node.label.split("\n"), x = position.x + position.w / 2;
     const text = lines.length === 1
       ? `<text x="${x}" y="${position.y + position.h / 2}" text-anchor="middle" dominant-baseline="middle">${esc(lines[0])}</text>`
-      : `<text x="${x}" y="${position.y + position.h / 2 - (lines.length - 1) * 10}" text-anchor="middle" dominant-baseline="middle">${lines.map((line, index) => `<tspan x="${x}"${index ? ` dy="20"` : ""}>${esc(line)}</tspan>`).join("")}</text>`;
-    return `<g class="node" data-node-id="${esc(node.id)}">${shape}${text}</g>`;
+      : `<text x="${x}" y="${position.y + position.h / 2 - (lines.length - 1) * 10}" text-anchor="middle" dominant-baseline="middle">${lines.map((line, index) => `<tspan class="${index === 0 && sectionParents.has(node.id) ? "section-title-line" : "section-content-line"}" x="${x}"${index ? ` dy="20"` : ""}>${esc(line)}</tspan>`).join("")}</text>`;
+    return `<g class="node${sectionParents.has(node.id) ? " section-title" : ""}" data-node-id="${esc(node.id)}">${shape}${text}</g>`;
   }).join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} 0 ${maxX - minX} ${maxY}" role="img"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z"/></marker></defs><style>.edge{fill:none;stroke:#64748b;stroke-width:2}.edge-label{font:${fontSize}px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#0f172a;paint-order:stroke;stroke:#f8fafc;stroke-width:8px;stroke-linejoin:round}.group rect{fill:#f8fafc;stroke:#aab4c5;stroke-width:1.5;stroke-dasharray:5 4}.group text{font:11px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#748096}.node rect{fill:#fff;stroke:#334155;stroke-width:2}.node .text-node{fill:#f8fafc}.node text{font:${fontSize}px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#0f172a}</style>${groups}${paths}${edgeLabels}${nodes}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} 0 ${maxX - minX} ${maxY}" role="img"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z"/></marker></defs><style>.edge{fill:none;stroke:#64748b;stroke-width:2}.edge-label{font:${fontSize}px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#0f172a;paint-order:stroke;stroke:#f8fafc;stroke-width:8px;stroke-linejoin:round}.group rect{fill:#f8fafc;stroke:#aab4c5;stroke-width:1.5;stroke-dasharray:5 4}.group text{font:11px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#748096}.section-separator{stroke:#94a3b8;stroke-width:1.5;stroke-dasharray:6 4}.node rect{fill:#fff;stroke:#334155;stroke-width:2}.node .text-node{fill:#f8fafc}.node.section-title rect{fill:#eef2f7;stroke:#334155;stroke-width:2.5}.node.section-title text,.section-title-line{font-weight:600}.section-content-line{font-weight:400}.node text{font:${fontSize}px ${esc(options.fontFamily ?? "system-ui, sans-serif")};fill:#0f172a}</style>${groups}${sectionSeparators}${paths}${edgeLabels}${nodes}</svg>`;
 }

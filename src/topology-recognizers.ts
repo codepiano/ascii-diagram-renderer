@@ -18,6 +18,7 @@ const center = (bounds: Bounds): Point => ({
 });
 const distance = (a: Point, b: Point) => Math.abs(a.row - b.row) + Math.abs(a.col - b.col);
 const nearestColumn = (columns: number[], point: Point) => [...columns].sort((a, b) => Math.abs(a - point.col) - Math.abs(b - point.col) || a - b)[0];
+const isSectionTitle = (node: DiagramNode) => /^\[[^\]]+\]/.test(node.label.trim());
 const componentForPoints = (connectors: PrimitiveConnector[], points: Point[]) => {
   const matches = connectors.map(component => ({
     component,
@@ -135,7 +136,12 @@ export function recognizeArrows(context: TopologyContext): EdgeCandidate[] {
     const candidates = arrow.direction === "down" || arrow.direction === "up"
       ? [before.sort((a, b) => distance(center(b.sourceBounds), arrow.point) - distance(center(a.sourceBounds), arrow.point)).at(-1), after.sort((a, b) => distance(center(a.sourceBounds), arrow.point) - distance(center(b.sourceBounds), arrow.point))[0]]
       : [before.at(-1), after[0]];
-    const source = arrow.direction === "up" || arrow.direction === "left" ? candidates[1] : candidates[0];
+    const sectionTitle = arrow.direction === "down"
+      ? nodes.filter(node => isSectionTitle(node) && node.sourceBounds.bottom < arrow.point.row)
+        .filter(node => primitives.arrows.some(candidate => candidate.direction === "right" && candidate.point.row === node.sourceBounds.bottom + 1))
+        .sort((a, b) => b.sourceBounds.bottom - a.sourceBounds.bottom)[0]
+      : undefined;
+    const source = arrow.direction === "up" || arrow.direction === "left" ? candidates[1] : sectionTitle ?? candidates[0];
     const target = arrow.direction === "up" || arrow.direction === "left" ? candidates[0] : candidates[1];
     if (!source || !target || source.id === target.id) return [];
     const evidence = [arrow.id, ...adjacentComponents(primitives.connectors, arrow.point).map(component => component.id)];
@@ -230,4 +236,32 @@ export function recognizeExampleGroups(context: TopologyContext): Array<Recognit
     });
   }
   return candidates;
+}
+
+/** A bracketed title can own a horizontal content row without flattening it. */
+export function recognizeSectionGroups(context: TopologyContext): Array<RecognitionCandidate<GroupInterpretation>> {
+  const { nodes, primitives } = context;
+  return nodes.flatMap(parent => {
+    if (!isSectionTitle(parent)) return [];
+    const row = parent.sourceBounds.bottom + 1;
+    const members = nodes.filter(node => node.id !== parent.id && node.sourceBounds.top === row);
+    const hasHorizontalContent = primitives.arrows.some(arrow => arrow.direction === "right" && arrow.point.row === row);
+    if (members.length < 2 || !hasHorizontalContent) return [];
+    const evidence = [parent.id, ...members.map(member => member.id), ...primitives.arrows.filter(arrow => arrow.point.row === row).map(arrow => arrow.id)];
+    return [{
+      id: `section:${parent.id}`,
+      recognizer: "section",
+      priority: 45,
+      confidence: 0.9,
+      consumes: members.map(member => `section-member:${member.id}`),
+      evidence,
+      value: {
+        kind: "group",
+        label: parent.label.replace(/^\[|\]$/g, ""),
+        parent: parent.id,
+        members: members.map(member => member.id),
+        sourceBounds: { top: row, left: Math.min(...members.map(member => member.sourceBounds.left)), bottom: row, right: Math.max(...members.map(member => member.sourceBounds.right)) }
+      }
+    }];
+  });
 }
